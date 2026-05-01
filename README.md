@@ -1,7 +1,7 @@
 # TigerTag — Intégration Home Assistant
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![GitHub release](https://img.shields.io/github/release/Kenny3231/tigertag.svg)](https://github.com/Kenny3231/tigertag/releases)
+[![GitHub release](https://img.shields.io/github/release/Kenny3231/TigerTag.svg)](https://github.com/Kenny3231/TigerTag/releases)
 ![Maintenance](https://img.shields.io/maintenance/yes/2025.svg)
 
 > **⚠️ Avertissement** : Cette intégration est un projet communautaire **non officiel et non affilié** à TigerTag Project. Elle utilise l'API publique de TigerTag et n'est pas endorsée, soutenue ou maintenue par TigerTag Project.
@@ -50,7 +50,7 @@ Elle inclut :
 
 1. Ouvrez HACS dans Home Assistant
 2. Cliquez sur le menu ⋮ → **Dépôts personnalisés**
-3. Ajoutez l'URL : `https://github.com/Kenny3231/tigertag`
+3. Ajoutez l'URL : `https://github.com/Kenny3231/TigerTag`
 4. Catégorie : **Intégration**
 5. Cliquez sur **TigerTag** → **Télécharger**
 6. Redémarrez Home Assistant
