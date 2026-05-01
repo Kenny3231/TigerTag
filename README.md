@@ -98,11 +98,10 @@ En **mode UI**, la ressource est enregistrée automatiquement.
 
 ```yaml
 type: custom:tigertag-card
-mqtt_topic: device/VOTRE_SERIAL/request  # optionnel, pour Bambu Lab
-low_stock_threshold: 250                  # seuil alerte stock faible (défaut: 250g)
-rooms:                                    # optionnel, remplace les lieux de la config
-  - Garage
-  - Salon
+grid_options:
+  columns: 48
+  rows: auto
+
 ```
 
 ---
