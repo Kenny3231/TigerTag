@@ -2,7 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![GitHub release](https://img.shields.io/github/release/Kenny3231/TigerTag.svg)](https://github.com/Kenny3231/TigerTag/releases)
-![Maintenance](https://img.shields.io/maintenance/yes/2025.svg)
+![Maintenance](https://img.shields.io/maintenance/yes/2026.svg)
 
 > **⚠️ Avertissement** : Cette intégration est un projet communautaire **non officiel et non affilié** à TigerTag Project. Elle utilise l'API publique de TigerTag et n'est pas endorsée, soutenue ou maintenue par TigerTag Project.
 
