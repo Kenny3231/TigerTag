@@ -1,7 +1,7 @@
 {
   "domain": "tigertag",
   "name": "TigerTag",
-  "codeowners": ["@ton_pseudo_github"],
+  "codeowners": ["@Kenny3231"],
   "config_flow": true,
   "dependencies": ["mqtt"],
   "iot_class": "cloud_polling",
