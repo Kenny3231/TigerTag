@@ -1,0 +1,110 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "TigerTag — Connexion",
+        "description": "Entrez vos identifiants TigerTag.",
+        "data": {
+          "email": "Adresse e-mail",
+          "api_key": "Clé API"
+        }
+      },
+      "locations": {
+        "title": "TigerTag — Lieux de stockage",
+        "description": "Entrez vos lieux de stockage séparés par des virgules (ex : {example}).\nVous pourrez les modifier depuis la configuration de l'intégration.",
+        "data": {
+          "locations_raw": "Lieux (séparés par des virgules)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Identifiants incorrects. Vérifiez votre e-mail et votre clé API.",
+      "cannot_connect": "Impossible de se connecter à l'API TigerTag. Vérifiez votre connexion.",
+      "unknown": "Erreur inattendue. Consultez les journaux Home Assistant.",
+      "no_locations": "Veuillez saisir au moins un lieu."
+    },
+    "abort": {
+      "already_configured": "Ce compte TigerTag est déjà configuré."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Lieux de stockage",
+        "description": "Entrez vos lieux de stockage séparés par des virgules (ex : {example}).",
+        "data": {
+          "locations_raw": "Lieux (séparés par des virgules)"
+        }
+      }
+    },
+    "error": {
+      "no_locations": "Veuillez saisir au moins un lieu."
+    }
+  },
+  "services": {
+    "update_spool_weight": {
+      "name": "Mettre à jour le poids d'une bobine",
+      "description": "Met à jour le poids restant d'une bobine TigerTag via son UID. Met également à jour le Twin Tag si la bobine en possède un.",
+      "fields": {
+        "uid": {
+          "name": "UID de la bobine",
+          "description": "Identifiant unique de la bobine (visible dans les attributs de l'entité)."
+        },
+        "weight": {
+          "name": "Poids (grammes)",
+          "description": "Poids total restant sur la bobine, en grammes."
+        },
+        "container_weight": {
+          "name": "Poids de la bobine vide (grammes)",
+          "description": "Poids du support vide (tare). Laisser à 0 si le poids fourni est déjà le poids net."
+        }
+      }
+    },
+    "set_spool_room": {
+      "name": "Définir le lieu de stockage d'une bobine",
+      "description": "Assigne une bobine à un lieu de stockage. Persisté localement entre les redémarrages.",
+      "fields": {
+        "uid": {
+          "name": "UID de la bobine",
+          "description": "Identifiant unique de la bobine."
+        },
+        "room": {
+          "name": "Lieu",
+          "description": "Nom du lieu de stockage. Mettre à null pour supprimer."
+        }
+      }
+    },
+    "set_spool_tare": {
+      "name": "Définir la tare d'une bobine (masterspool)",
+      "description": "Remplace la tare officielle TigerTag pour une bobine. Utile avec un masterspool non officiel. Persisté localement.",
+      "fields": {
+        "uid": {
+          "name": "UID de la bobine",
+          "description": "Identifiant unique de la bobine."
+        },
+        "tare": {
+          "name": "Tare (grammes)",
+          "description": "Poids du support vide en grammes."
+        }
+      }
+    },
+    "set_bambu_ams_filament": {
+      "name": "Configurer un filament dans l'AMS Bambu Lab",
+      "description": "Envoie les données d'une bobine TigerTag vers un emplacement AMS Bambu Lab via l'intégration bambu_lab. Met à jour l'attribut ams_location automatiquement.",
+      "fields": {
+        "uid": {
+          "name": "UID de la bobine",
+          "description": "Identifiant unique de la bobine TigerTag."
+        },
+        "tray_entity_id": {
+          "name": "Entité du tray AMS",
+          "description": "Entity ID du tray AMS Bambu Lab (ex : sensor.p2s_ams_1_emplacement_1)."
+        }
+      }
+    },
+    "refresh": {
+      "name": "Rafraîchir l'inventaire",
+      "description": "Force un rafraîchissement immédiat de l'inventaire TigerTag depuis l'API."
+    }
+  }
+}

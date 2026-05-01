@@ -1,0 +1,110 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "TigerTag — Connection",
+        "description": "Enter your TigerTag credentials.",
+        "data": {
+          "email": "Email address",
+          "api_key": "API Key"
+        }
+      },
+      "locations": {
+        "title": "TigerTag — Storage Locations",
+        "description": "Enter your storage locations separated by commas (e.g. {example}).\nYou can update them later from the integration settings.",
+        "data": {
+          "locations_raw": "Locations (comma-separated)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid credentials. Please check your email and API key.",
+      "cannot_connect": "Cannot connect to the TigerTag API. Please check your internet connection.",
+      "unknown": "Unexpected error. Check the Home Assistant logs for details.",
+      "no_locations": "Please enter at least one location."
+    },
+    "abort": {
+      "already_configured": "This TigerTag account is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Storage Locations",
+        "description": "Enter your storage locations separated by commas (e.g. {example}).",
+        "data": {
+          "locations_raw": "Locations (comma-separated)"
+        }
+      }
+    },
+    "error": {
+      "no_locations": "Please enter at least one location."
+    }
+  },
+  "services": {
+    "update_spool_weight": {
+      "name": "Update spool weight",
+      "description": "Updates the remaining weight of a TigerTag spool by UID. Also updates the Twin Tag if the spool has one.",
+      "fields": {
+        "uid": {
+          "name": "Spool UID",
+          "description": "Unique identifier of the spool (visible in the entity attributes)."
+        },
+        "weight": {
+          "name": "Weight (grams)",
+          "description": "Total remaining weight on the spool, in grams."
+        },
+        "container_weight": {
+          "name": "Empty spool weight (grams)",
+          "description": "Weight of the empty spool holder (tare). Leave at 0 if the weight provided is already net weight."
+        }
+      }
+    },
+    "set_spool_room": {
+      "name": "Set spool storage location",
+      "description": "Assigns a spool to a storage location. Persisted locally across restarts.",
+      "fields": {
+        "uid": {
+          "name": "Spool UID",
+          "description": "Unique identifier of the spool."
+        },
+        "room": {
+          "name": "Location",
+          "description": "Name of the storage location. Set to null to remove."
+        }
+      }
+    },
+    "set_spool_tare": {
+      "name": "Set spool tare (masterspool)",
+      "description": "Overrides the official TigerTag tare for a spool. Useful with a non-official masterspool. Persisted locally.",
+      "fields": {
+        "uid": {
+          "name": "Spool UID",
+          "description": "Unique identifier of the spool."
+        },
+        "tare": {
+          "name": "Tare (grams)",
+          "description": "Weight of the empty spool holder in grams."
+        }
+      }
+    },
+    "set_bambu_ams_filament": {
+      "name": "Configure Bambu Lab AMS filament",
+      "description": "Sends TigerTag spool data to a Bambu Lab AMS slot via the bambu_lab integration. Automatically updates the ams_location attribute.",
+      "fields": {
+        "uid": {
+          "name": "Spool UID",
+          "description": "Unique identifier of the TigerTag spool."
+        },
+        "tray_entity_id": {
+          "name": "AMS tray entity",
+          "description": "Entity ID of the Bambu Lab AMS tray (e.g. sensor.p2s_ams_1_slot_1)."
+        }
+      }
+    },
+    "refresh": {
+      "name": "Refresh inventory",
+      "description": "Forces an immediate refresh of the TigerTag inventory from the API."
+    }
+  }
+}

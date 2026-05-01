@@ -1,0 +1,10 @@
+{
+  "domain": "tigertag",
+  "name": "TigerTag",
+  "codeowners": ["@ton_pseudo_github"],
+  "config_flow": true,
+  "dependencies": ["mqtt"],
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "1.1.0"
+}

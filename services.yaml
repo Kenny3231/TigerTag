@@ -1,0 +1,75 @@
+update_spool_weight:
+  name: "Mettre à jour le poids d'une bobine"
+  description: "Met à jour le poids restant d'une bobine TigerTag via son UID."
+  fields:
+    uid:
+      name: "UID de la bobine"
+      description: "Identifiant unique de la bobine (visible dans les attributs de l'entité)."
+      required: true
+      selector:
+        text:
+    weight:
+      name: "Poids (grammes)"
+      description: "Poids total restant sur la bobine, en grammes."
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 99999
+          step: 1
+          unit_of_measurement: g
+          mode: box
+    container_weight:
+      name: "Poids du support (grammes)"
+      description: "Poids de la bobine vide. Sera déduit côté serveur si renseigné. Défaut : 0."
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 9999
+          step: 1
+          unit_of_measurement: g
+          mode: box
+
+set_bambu_ams_filament:
+  name: "Définir un filament dans l'AMS Bambu Lab"
+  description: >
+    Envoie les informations d'une bobine TigerTag vers l'AMS d'une imprimante
+    Bambu Lab via MQTT. L'emplacement est automatiquement mémorisé dans l'attribut
+    'ams_location' de l'entité bobine.
+  fields:
+    uid:
+      name: "UID de la bobine"
+      description: "Identifiant de la bobine TigerTag (visible dans les attributs de l'entité)."
+      required: true
+      selector:
+        text:
+    ams_id:
+      name: "ID de l'AMS"
+      description: "Numéro de l'AMS cible (0 = premier AMS)."
+      required: true
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 3
+          step: 1
+          mode: box
+    tray_id:
+      name: "Numéro d'emplacement (Tray)"
+      description: "Position dans l'AMS, de 0 (gauche) à 3 (droite)."
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 3
+          step: 1
+          mode: box
+    mqtt_topic:
+      name: "Topic MQTT Bambu Lab"
+      description: "Topic de requête de l'imprimante, au format : device/<SERIAL>/request"
+      required: true
+      example: "device/00E001234567/request"
+      selector:
+        text:
