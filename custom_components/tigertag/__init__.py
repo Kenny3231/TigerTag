@@ -25,7 +25,7 @@ PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SENSOR]
 
 # URL sous laquelle la carte Lovelace est servie par HA
 # Le fichier tigertag-card.js est dans custom_components/tigertag/
-_CARD_URL  = "/tigertag-card/tigertag-card.js"
+_CARD_URL  = "/local/tigertag-card.js"
 _CARD_PATH = "tigertag-card.js"  # nom du fichier dans le dossier de l'intégration
 
 # ── Schémas de validation ────────────────────────────────────────────────────
