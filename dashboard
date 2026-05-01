@@ -1,0 +1,46 @@
+title: Stock
+icon: mdi:printer-3d-nozzle
+path: tigertag-stock
+type: sections
+max_columns: 4
+cards: []
+sections:
+  - type: grid
+    column_span: 4
+    cards:
+      - type: custom:mushroom-template-card
+        primary: Bobines en stock
+        secondary: "{{ states('sensor.tigertag_statistiques', 'count_unique') }} bobines"
+        icon: mdi:archive-outline
+        icon_color: teal
+      - type: custom:mushroom-template-card
+        primary: Sans localisation
+        secondary: >-
+          {{ state_attr('sensor.tigertag_statistiques', 'count_no_location') }}
+          bobines
+        icon: mdi:view-grid-outline
+        icon_color: blue
+      - type: custom:mushroom-template-card
+        primary: Stock faible
+        secondary: >-
+          {{ state_attr('sensor.tigertag_statistiques', 'count_low_stock') }}
+          bobines
+        icon: mdi:alert-outline
+        icon_color: >
+          {% set n = state_attr('sensor.tigertag_studio_statistiques',
+          'count_low_stock') | int(0) %} {% if n == 0 %}green {% elif n <= 2
+          %}orange {% else %}red{% endif %}
+      - type: custom:mushroom-template-card
+        primary: Filament total
+        secondary: "{{ state_attr('sensor.tigertag_statistiques', 'total_weight_kg') }} kg"
+        icon: mdi:weight-kilogram
+        icon_color: green
+  - type: grid
+    column_span: 4
+    cards:
+      - type: heading
+        heading: Toutes les bobines
+      - type: custom:tigertag-card
+        grid_options:
+          columns: 48
+          rows: auto
