@@ -1,9 +1,15 @@
 {
   "domain": "tigertag",
   "name": "TigerTag",
-  "codeowners": ["@Kenny3231"],
+  "codeowners": [
+    "@Kenny3231"
+  ],
   "config_flow": true,
-  "dependencies": ["mqtt"],
+  "dependencies": [
+    "mqtt"
+  ],
+  "documentation": "https://github.com/Kenny3231/TigerTag",
+  "issue_tracker": "https://github.com/Kenny3231/TigerTag/issues",
   "iot_class": "cloud_polling",
   "requirements": [],
   "version": "2.0.0"
