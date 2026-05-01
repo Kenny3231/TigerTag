@@ -36,7 +36,7 @@ Elle inclut :
 ## Prérequis
 
 - Home Assistant 2024.1 ou supérieur
-- Compte TigerTag avec une clé API ([obtenir ici](https://app.tigertag.io))
+- Compte TigerTag avec une clé API 
 - [HACS](https://hacs.xyz) installé
 
 ### Optionnel
