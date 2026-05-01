@@ -629,19 +629,26 @@ class TigerTagCard extends HTMLElement {
     wSec.innerHTML = `<div class="tt-section-label">Poids</div>`;
     const wBox = document.createElement("div");
     wBox.className = "tt-weight-box";
+    // maxBrut = ce que la balance peut afficher (filament plein + tare)
+    const maxBrut = s.capacity + s.tare;
+    // Valeur brute initiale = poids net actuel + tare (ce que la balance affiche)
+    const wBrut = Math.round(w) + s.tare;
     wBox.innerHTML = `
       <div class="tt-weight-top">
         <span class="tt-weight-val" id="tt-wval">${Math.round(w)} g</span>
-        <span class="tt-weight-cap">${s.capacity} g total</span>
+        <span class="tt-weight-cap">/ ${s.capacity} g</span>
       </div>
       <div class="tt-w-bar"><div class="tt-w-bar-fill" id="tt-wbar" style="width:${pct}%;background:${bc}"></div></div>
-      <input type="range" class="tt-range" id="tt-range" min="0" max="${s.capacity}" step="1" value="${w}" />
+      <input type="range" class="tt-range" id="tt-range" min="${s.tare}" max="${maxBrut}" step="1" value="${wBrut}" />
       <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--secondary-text-color);margin-bottom:8px">
-        <span>0 g</span><span>${s.capacity} g</span>
+        <span id="tt-lbl-min">${s.tare} g (tare)</span><span id="tt-lbl-max">${maxBrut} g (max balance)</span>
       </div>
       <div class="tt-weight-row2">
-        <input type="number" class="tt-w-input" id="tt-winput" min="0" max="${s.capacity}" step="1" value="${Math.round(w)}" />
+        <input type="number" class="tt-w-input" id="tt-winput" min="${s.tare}" max="${maxBrut}" step="1" value="${wBrut}" />
         <button class="tt-btn-save" id="tt-save">Enregistrer</button>
+      </div>
+      <div class="tt-w-note" style="color:var(--tt-green);background:color-mix(in srgb,var(--tt-green) 8%,transparent);padding:5px 8px;border-radius:5px">
+        <span id="tt-w-brut-val">${wBrut}</span> g − tare <span id="tt-w-tare-val">${s.tare}</span> g = <strong id="tt-w-net-val">${Math.round(w)}</strong> g net
       </div>
       ${s.has_twin?`<div class="tt-w-note" style="color:var(--tt-blue);display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;display:inline-flex">${LINK_SVG}</span>Twin Tag — les deux puces seront mises à jour</div>`:""}
       <div class="tt-tare-row">
@@ -666,19 +673,54 @@ class TigerTagCard extends HTMLElement {
     const wval_  = wBox.querySelector("#tt-wval");
     const wbar_  = wBox.querySelector("#tt-wbar");
 
-    const syncW = (v) => {
-      const n = Math.round(Math.max(0, Math.min(s.capacity, Number(v))));
-      this._editWeight = n;
-      if (wval_) wval_.textContent = n + " g";
-      if (wbar_) { wbar_.style.width = this._pct(n,s.capacity)+"%"; wbar_.style.background = this._barColor(n,s.capacity); }
-      if (rng_  && rng_  !== document.activeElement) rng_.value  = n;
-      if (winp_ && winp_ !== document.activeElement) winp_.value = n;
+    // syncW recalcule tout depuis la tare courante (s.tare peut changer après Appliquer)
+    const syncW = (brut) => {
+      const currentTare = s.tare;
+      const currentMax  = s.capacity + currentTare;
+      const b = Math.round(Math.max(currentTare, Math.min(currentMax, Number(brut))));
+      const net = Math.max(0, b - currentTare);
+      this._editWeight = net;
+      if (wval_) wval_.textContent = net + " g";
+      if (wbar_) { wbar_.style.width = this._pct(net,s.capacity)+"%"; wbar_.style.background = this._barColor(net,s.capacity); }
+      if (rng_  && rng_  !== document.activeElement) { rng_.min  = currentTare; rng_.max  = currentMax; rng_.value = b; }
+      if (winp_ && winp_ !== document.activeElement) { winp_.min = currentTare; winp_.max = currentMax; winp_.value = b; }
+      // Mettre à jour les labels min/max sous le slider
+      const labMin = wBox.querySelector("#tt-lbl-min");
+      const labMax = wBox.querySelector("#tt-lbl-max");
+      if (labMin) labMin.textContent = currentTare + " g (tare)";
+      if (labMax) labMax.textContent = currentMax + " g (max balance)";
+      // Note de calcul : toujours visible
+      const brutVal = wBox.querySelector("#tt-w-brut-val");
+      const netVal  = wBox.querySelector("#tt-w-net-val");
+      const tareVal = wBox.querySelector("#tt-w-tare-val");
+      if (brutVal) brutVal.textContent = b;
+      if (netVal)  netVal.textContent  = net;
+      if (tareVal) tareVal.textContent = currentTare;
+    };
+
+    // syncTare : appelé après Appliquer — met à jour s.tare puis resynchronise
+    const _origSaveTare = this._saveTare.bind(this);
+    const saveTareAndResync = async () => {
+      const v = parseInt(tareI_.value);
+      if (isNaN(v)) return;
+      tSave_.textContent = "…";
+      try {
+        await this._hass.callService("tigertag", "set_spool_tare", { uid: s.uid, tare: v });
+        s.tare = v; s.tare_custom = v;
+        // Recalculer avec le poids brut actuel (valeur dans l'input)
+        syncW(Number(winp_.value));
+        tSave_.textContent = "Appliquer ✓";
+        setTimeout(() => { tSave_.textContent = "Appliquer"; }, 1500);
+      } catch(e) {
+        console.warn("[TigerTagCard] saveTare:", e);
+        tSave_.textContent = "Appliquer";
+      }
     };
 
     if (rng_)   rng_.addEventListener("input",   e => syncW(e.target.value));
     if (winp_)  winp_.addEventListener("input",  e => syncW(e.target.value));
     if (saveB_) saveB_.addEventListener("click", () => this._saveWeight(s, saveB_));
-    if (tSave_) tSave_.addEventListener("click", () => this._saveTare(s, tareI_, tSave_));
+    if (tSave_) tSave_.addEventListener("click", saveTareAndResync);
 
     // ── Section Emplacement ──
     const rooms    = this._getConfigLocations();
