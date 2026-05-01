@@ -5,7 +5,7 @@ Merci de votre intérêt pour contribuer à ce projet !
 ## Comment contribuer
 
 ### Signaler un bug
-1. Vérifiez que le bug n'est pas déjà signalé dans les [Issues](https://github.com/Kenny3231/tigertag/issues)
+1. Vérifiez que le bug n'est pas déjà signalé dans les [Issues](https://github.com/Kenny3231/TigerTag/issues)
 2. Ouvrez une nouvelle issue avec le template "Bug report"
 3. Incluez :
    - La version de Home Assistant
