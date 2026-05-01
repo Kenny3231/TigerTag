@@ -1,0 +1,8 @@
+{
+  "name": "TigerTag",
+  "description": "Intégration Home Assistant non officielle pour la gestion d'inventaire de bobines de filament TigerTag. Inclut une carte Lovelace custom et l'intégration Bambu Lab.",
+  "render_readme": true,
+  "hacs": "1.6.0",
+  "homeassistant": "2024.1.0",
+  "iot_class": "cloud_polling"
+}
