@@ -217,6 +217,8 @@ class TigerTagSpoolSensor(CoordinatorEntity[TigerTagDataUpdateCoordinator], Sens
             "link_food":    clean_value(d.get("LinkFOOD")),
             # Couleurs étendues
             "online_color_list": d.get("online_color_list") or [],
+            # Profil filament Bambu sauvegardé (tray_info_idx)
+            "bambu_profile_idx": coord.get_spool_profile(self._uid),
             "online_color_type": d.get("online_color_type"),
             # Dates (epoch seconds après nettoyage Firestore dans api.py)
             "updated_at":  d.get("updated_at"),   # dernière modif (epoch s)
@@ -338,4 +340,9 @@ class TigerTagStatsSensor(CoordinatorEntity[TigerTagDataUpdateCoordinator], Sens
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return self._compute_stats()
+        stats = self._compute_stats()
+        # Ajouter les profils Bambu mis en cache (pour la carte JS)
+        bambu_profiles = (self.coordinator.data or {}).get("bambu_profiles", {})
+        if bambu_profiles:
+            stats["bambu_profiles"] = bambu_profiles
+        return stats

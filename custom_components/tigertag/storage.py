@@ -25,12 +25,16 @@ class TigerTagStorage:
         self._ref_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}_references.json")
         self._loc_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}_locations.json")
         self._room_store = Store(hass, _STORE_VERSION, f"{DOMAIN}_rooms.json")
-        self._tare_store = Store(hass, _STORE_VERSION, f"{DOMAIN}_tares.json")
+        self._tare_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}_tares.json")
+        self._prev_store    = Store(hass, _STORE_VERSION, f"{DOMAIN}_prev_rooms.json")
+        self._profile_store = Store(hass, _STORE_VERSION, f"{DOMAIN}_spool_profiles.json")
 
         self._references: dict[str, Any] = {}
         self._locations:  dict[str, str] = {}   # uid → entity_id tray Bambu
         self._rooms:      dict[str, str] = {}   # uid → lieu de stockage
         self._tares:      dict[str, int] = {}   # uid → tare en grammes
+        self._prev_rooms:    dict[str, str] = {}   # uid → lieu précédent (avant AMS)
+        self._spool_profiles: dict[str, str] = {}   # uid → tray_info_idx sauvegardé
         self._references_fetched_at: datetime | None = None
 
     # ── Chargement initial ──────────────────────────────────────────────────
@@ -39,6 +43,8 @@ class TigerTagStorage:
         await self._load_locations()
         await self._load_rooms()
         await self._load_tares()
+        await self._load_prev_rooms()
+        await self._load_spool_profiles()
 
     async def _load_refs(self) -> None:
         d = await self._ref_store.async_load()
@@ -65,6 +71,16 @@ class TigerTagStorage:
         d = await self._tare_store.async_load()
         if isinstance(d, dict):
             self._tares = d
+
+    async def _load_prev_rooms(self) -> None:
+        d = await self._prev_store.async_load()
+        if isinstance(d, dict):
+            self._prev_rooms = d
+
+    async def _load_spool_profiles(self) -> None:
+        d = await self._profile_store.async_load()
+        if isinstance(d, dict):
+            self._spool_profiles = d
 
     # ── Références ──────────────────────────────────────────────────────────
     @property
@@ -112,6 +128,28 @@ class TigerTagStorage:
         else:
             self._rooms[uid] = room
         await self._room_store.async_save(self._rooms)
+
+    # ── Profils filament sauvegardés ──────────────────────────────────────────
+    def get_spool_profile(self, uid: str) -> str | None:
+        return self._spool_profiles.get(uid)
+
+    async def async_set_spool_profile(self, uid: str, tray_info_idx: str | None) -> None:
+        if tray_info_idx is None:
+            self._spool_profiles.pop(uid, None)
+        else:
+            self._spool_profiles[uid] = tray_info_idx
+        await self._profile_store.async_save(self._spool_profiles)
+
+    # ── Lieux précédents (avant AMS) ───────────────────────────────────────────
+    def get_prev_room(self, uid: str) -> str | None:
+        return self._prev_rooms.get(uid)
+
+    async def async_set_prev_room(self, uid: str, room: str | None) -> None:
+        if room is None:
+            self._prev_rooms.pop(uid, None)
+        else:
+            self._prev_rooms[uid] = room
+        await self._prev_store.async_save(self._prev_rooms)
 
     # ── Tares custom ─────────────────────────────────────────────────────────
     @property

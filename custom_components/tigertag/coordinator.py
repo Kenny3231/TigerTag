@@ -58,6 +58,18 @@ class TigerTagDataUpdateCoordinator(DataUpdateCoordinator):
     async def async_set_room(self, uid: str, room: str | None) -> None:
         await self.storage.async_set_room(uid, room)
 
+    def get_spool_profile(self, uid: str) -> str | None:
+        return self.storage.get_spool_profile(uid)
+
+    async def async_set_spool_profile(self, uid: str, tray_info_idx: str | None) -> None:
+        await self.storage.async_set_spool_profile(uid, tray_info_idx)
+
+    def get_prev_room(self, uid: str) -> str | None:
+        return self.storage.get_prev_room(uid)
+
+    async def async_set_prev_room(self, uid: str, room: str | None) -> None:
+        await self.storage.async_set_prev_room(uid, room)
+
     def get_tare(self, uid: str) -> int | None:
         return self.storage.get_tare(uid)
 

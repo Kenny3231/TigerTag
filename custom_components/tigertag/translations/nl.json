@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "TigerTag Verbinding",
+        "description": "Voer je TigerTag-inloggegevens in. Je vindt je API-sleutel in de TigerTag Studio app.",
+        "data": {
+          "email": "E-mailadres",
+          "api_key": "API-sleutel"
+        }
+      },
+      "locations": {
+        "title": "Opslaglocaties",
+        "description": "Definieer je opslaglocaties gescheiden door komma's (bijv. {example}).",
+        "data": {
+          "locations_raw": "Opslaglocaties"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Ongeldige API-sleutel of e-mailadres.",
+      "cannot_connect": "Kan geen verbinding maken met de TigerTag API.",
+      "no_locations": "Definieer ten minste één opslaglocatie.",
+      "unknown": "Onbekende fout. Controleer de logboeken voor meer details."
+    },
+    "abort": {
+      "already_configured": "Dit TigerTag-account is al geconfigureerd."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opslaglocaties bewerken",
+        "description": "Bewerk je opslaglocaties gescheiden door komma's (bijv. {example}).",
+        "data": {
+          "locations_raw": "Opslaglocaties"
+        }
+      }
+    },
+    "error": {
+      "no_locations": "Definieer ten minste één opslaglocatie."
+    }
+  }
+}

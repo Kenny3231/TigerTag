@@ -221,6 +221,42 @@ input[type=range].tt-range { width: 100%; margin: 0 0 8px; cursor: pointer; acce
 
 .tt-empty { grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--secondary-text-color); font-size: 13px; }
 
+/* ── Panneau — structure principale ── */
+.tt-panel { display:flex; flex-direction:column; overflow:hidden; }
+.tt-panel-head { flex-shrink:0; }
+.tt-panel-scroll {
+  flex:1; overflow-y:auto; overflow-x:hidden;
+  overscroll-behavior:contain;
+}
+/* Image dans le panneau — sticky après le header */
+.tt-panel-img-wrap {
+  position:sticky; top:0; z-index:1;
+  background:var(--secondary-background-color);
+  flex-shrink:0;
+}
+.tt-panel-infobar { padding: 10px 12px 4px; }
+.tt-panel-name { font-size: 16px; font-weight: 500; color: var(--primary-text-color); }
+.tt-panel-meta { font-size: 11px; color: var(--secondary-text-color); margin-top: 2px; }
+.tt-panel-tags {
+  display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 10px;
+  background: linear-gradient(to bottom, transparent 0%, var(--card-background-color) 80%);
+  margin-top: -32px; position: relative; z-index: 2;
+}
+.tt-panel-split { border-top: 1px solid var(--divider-color); border-bottom: 1px solid var(--divider-color); }
+.tt-section-label { font-size: 10px; font-weight: 500; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+
+/* ── Onglets panneau ── */
+.tt-tabs { display:flex; border-bottom:1px solid var(--divider-color); flex-shrink:0; }
+.tt-tab {
+  flex:1; padding:10px 12px; font-size:12px; font-weight:500;
+  color:var(--secondary-text-color); cursor:pointer; text-align:center;
+  border-bottom:2px solid transparent; transition:all .15s;
+}
+.tt-tab:hover { color:var(--primary-text-color); }
+.tt-tab.active { color:var(--tt-green); border-bottom-color:var(--tt-green); }
+.tt-tab-content { display:none; flex:1; overflow-y:auto; overflow-x:hidden; }
+.tt-tab-content.active { display:flex; flex-direction:column; }
+
 /* ── Toggle vue ── */
 .tt-view-toggle { display:flex; gap:4px; flex-shrink:0; }
 .tt-view-btn {
@@ -294,24 +330,96 @@ class TigerTagCard extends HTMLElement {
   }
 
   /* ── Détection Bambu Lab ─────────────────────────────────────────────── */
+
+  /**
+   * Détecte tous les trays Bambu Lab dans hass.states
+   * en cherchant les entités qui ont tag_uid + tray_uuid dans leurs attributs.
+   * Fonctionne pour N imprimantes (P2S, X1C, A1...) et N AMS.
+   */
   _getBambuTrayEntities() {
     if (!this._hass) return [];
+    // Mots-clés qui indiquent un sensor virtuel (pas un emplacement physique)
+    const VIRTUAL = ["actif", "active", "current", "now", "en_cours"];
     return Object.values(this._hass.states).filter(e => {
       if (!e.entity_id.startsWith("sensor.")) return false;
       const a = e.attributes;
-      // Les trays Bambu exposent nozzle_temp_min_val ou tray_type
-      return (a.tray_type !== undefined || a.nozzle_temp_min_val !== undefined)
-        && !e.entity_id.includes("tigertag");
+      // Signature unique d'un tray Bambu Lab (ha-bambulab)
+      if (a.tag_uid === undefined || a.tray_uuid === undefined) return false;
+      // Exclure les sensors virtuels (emplacement actif, current tray...)
+      const eid   = e.entity_id.toLowerCase();
+      const fname = (a.friendly_name || "").toLowerCase();
+      if (VIRTUAL.some(k => eid.includes(k) || fname.includes(k))) return false;
+      return true;
     });
   }
 
+  /**
+   * Extrait le nom de l'imprimante depuis l'entity_id.
+   * Ex: "sensor.p2s_ams_1_emplacement_1" → "P2S"
+   *     "sensor.x1c_bambu_ams_2_slot_3"  → "X1C Bambu"
+   */
+  _printerName(entityId) {
+    // Tout ce qui est avant "_ams_" ou "_external"
+    const m = entityId.match(/^sensor\.([^_]+(?:_[^_]+)*?)(?:_ams_|_external)/i);
+    if (m) return m[1].replace(/_/g, " ").toUpperCase();
+    return entityId.split(".")[1].split("_")[0].toUpperCase();
+  }
+
+  /**
+   * Construit la liste des options pour le sélecteur AMS,
+   * regroupées par imprimante.
+   * Retourne : [
+   *   { value: "—",           label: "Pas dans un AMS", group: null },
+   *   { value: "sensor.p2s_ams_1_emplacement_1", label: "AMS 1 — Emplacement 1", group: "P2S" },
+   *   { value: "sensor.p2s_external_spool", label: "Bobine externe", group: "P2S" },
+   *   ...
+   * ]
+   */
   _getBambuTrayOptions() {
     const trays = this._getBambuTrayEntities();
-    const opts = [{ value: "—", label: "Pas dans un AMS" }];
+    const opts  = [{ value: "—", label: "Pas dans un AMS", group: null }];
+
+    // Trier par entity_id pour un ordre stable
+    trays.sort((a, b) => a.entity_id.localeCompare(b.entity_id));
+
     trays.forEach(e => {
-      const name = e.attributes.friendly_name || e.entity_id;
-      opts.push({ value: e.entity_id, label: name });
+      const printer = this._printerName(e.entity_id);
+      const fname   = e.attributes.friendly_name || e.entity_id;
+      // Raccourcir le friendly_name : enlever le préfixe imprimante si présent
+      // "P2S AMS 1 Emplacement 1" → "AMS 1 — Emplacement 1"
+      const short = fname
+        .replace(new RegExp(`^${printer}\s*`, "i"), "")
+        .replace(/emplacement\s+(\d+)/i, "Empl. $1")
+        .replace(/slot\s+(\d+)/i,        "Slot $1")
+        .replace(/tray\s+(\d+)/i,        "Tray $1")
+        .replace(/external.*/i,          "Bobine externe")
+        .replace(/\s+/g, " ").trim() || fname;
+
+      // Indicateur visuel
+      const tagUid = (e.attributes.tag_uid || "").replace(/0/g,"");
+      const hasRfid = tagUid.length > 0;  // tag non vide = bobine avec puce
+      const active  = e.attributes.active;
+      // Chercher si une bobine TigerTag est assignée à ce tray
+      const hasTiger = this._allSpools().some(s => s.ams_entity === e.entity_id);
+
+      let icon  = "○";  // vide
+      let extra = "";
+      if (hasTiger) {
+        const tiger = this._allSpools().find(s => s.ams_entity === e.entity_id);
+        icon  = active ? "▶" : "●";
+        extra = tiger ? ` (${this._esc(tiger.name)})` : "";
+      } else if (hasRfid) {
+        icon = "◉";  // puce Bambu native
+      }
+
+      opts.push({
+        value:  e.entity_id,
+        label:  `${icon} ${short}${extra}`,
+        group:  printer,
+        entity: e,
+      });
     });
+
     return opts;
   }
 
@@ -403,9 +511,11 @@ class TigerTagCard extends HTMLElement {
     this._domOverlay.className = "tt-overlay";
     this._domOverlay.addEventListener("click", () => this._closePanel());
 
-    // Panneau
+    // Panneau détail bobine
     this._domPanel = document.createElement("div");
     this._domPanel.className = "tt-panel";
+
+    this._amsState = { tray: null, profile: null, uid: null, spool: null };
 
     this.shadowRoot.replaceChildren(style, root, this._domOverlay, this._domPanel);
     this._buildFilters();
@@ -495,6 +605,8 @@ class TigerTagCard extends HTMLElement {
       sku:          a.sku || null,
       barcode:      a.barcode || null,
       diameter:     a.diameter || null,
+      // Profil filament Bambu sauvegardé
+      bambu_profile_idx: a.bambu_profile_idx || null,
       // updated_at = epoch seconds, last_update = epoch ms (selon l'API TigerTag)
       // On normalise tout en epoch seconds pour _relTime
       last_update:  a.updated_at
@@ -837,7 +949,7 @@ class TigerTagCard extends HTMLElement {
     if (s.has_twin) {
       const dot = document.createElement("div");
       dot.className = "tt-twin-dot"; dot.title = "Twin Tag — 2 puces RFID";
-      dot.innerHTML = LINK_SVG + `<span>2×</span>`;
+      dot.innerHTML = LINK_SVG;
       imgWrap.appendChild(dot);
     }
     card.appendChild(imgWrap);
@@ -847,28 +959,30 @@ class TigerTagCard extends HTMLElement {
     if (s.ams_entity && this._hass && this._hass.states[s.ams_entity]) {
       const trayState = this._hass.states[s.ams_entity];
       amsLabel = trayState.attributes.friendly_name || s.ams_entity;
-      // Raccourcir : "P2S AMS 1 Emplacement 1" → "P2S T1"
       amsLabel = amsLabel.replace(/emplacement\s*/i, "T").replace(/\s+/g, " ").trim();
     }
 
-    const body = document.createElement("div");
-    body.className = "tt-spool-body";
-    // On affiche toujours le badge TigerTag+/TigerTag ET le lieu si défini
+    // Badges en overlay sur l'image — ordre : emplacement → TigerTag/TigerTag+
     const locBadge = amsLabel
       ? `<span class="tt-tag tt-tag-ams" title="${this._esc(s.ams_entity || '')}">${this._esc(amsLabel)}</span>`
       : s.room
         ? `<span class="tt-tag tt-tag-room">${this._esc(s.room)}</span>`
         : "";
     const typeBadge = `<span class="tt-tag ${s.is_plus ? "tt-tag-plus" : "tt-tag-base"}">${s.is_plus ? "TigerTag+" : "TigerTag"}</span>`;
-    const badge = locBadge || typeBadge;  // priorité au lieu, fallback sur type
-    // Ligne de badges : type (TigerTag+/TigerTag) + lieu si défini
-    const allBadges = locBadge 
-      ? typeBadge + locBadge 
-      : typeBadge;
+    const allBadges = (locBadge ? locBadge + typeBadge : typeBadge);
+
+    const badgeOverlay = document.createElement("div");
+    badgeOverlay.className = "tt-panel-badges";
+    badgeOverlay.style.cssText = "position:absolute;bottom:8px;left:8px;top:auto;display:flex;gap:4px;flex-wrap:wrap";
+    badgeOverlay.innerHTML = allBadges;
+    imgWrap.appendChild(badgeOverlay);
+
+    const body = document.createElement("div");
+    body.className = "tt-spool-body";
     body.innerHTML = `
       <div class="tt-spool-name">${this._esc(s.name)}</div>
       <div class="tt-spool-sub">${this._esc(s.material)}${s.brand ? " · " + this._esc(s.brand) : ""}</div>
-      <div class="tt-spool-foot" style="flex-wrap:wrap;gap:3px"><span class="tt-spool-weight">${Math.round(s.weight)} g</span><span style="display:flex;gap:3px;flex-wrap:wrap">${allBadges}</span></div>
+      <div class="tt-spool-foot"><span class="tt-spool-weight">${Math.round(s.weight)} g</span></div>
       <div class="tt-bar"><div class="tt-bar-fill" style="width:${pct}%;background:${bc}"></div></div>`;
     card.appendChild(body);
     card.addEventListener("click", () => this._openPanel(s));
@@ -900,76 +1014,129 @@ class TigerTagCard extends HTMLElement {
     const frag = document.createDocumentFragment();
     const w    = s.weight;
 
-    // Header
+    // ── Header (fermeture) ──────────────────────────────────────────────────
     const head = document.createElement("div");
     head.className = "tt-panel-head";
     const closeBtn = document.createElement("button");
     closeBtn.className = "tt-panel-close";
     closeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><line x1="2" y1="2" x2="12" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="12" y1="2" x2="2" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
     closeBtn.addEventListener("click", () => this._closePanel());
-    const headName = document.createElement("div");
-    headName.className = "tt-panel-head-name"; headName.textContent = s.name;
-    head.appendChild(closeBtn); head.appendChild(headName);
+    const titleWrap = document.createElement("div");
+    titleWrap.style.flex = "1";
+    const titleEl = document.createElement("div");
+    titleEl.className = "tt-panel-title";
+    titleEl.textContent = s.name || "Bobine";
+    const metaEl = document.createElement("div");
+    metaEl.style.cssText = "font-size:10px;color:var(--secondary-text-color);margin-top:1px";
+    const nameParts = [s.material, s.series, s.brand, s.diameter ? s.diameter+" mm" : null].filter(Boolean).join(" · ");
+    metaEl.textContent = nameParts;
+    titleWrap.appendChild(titleEl);
+    titleWrap.appendChild(metaEl);
+    head.appendChild(closeBtn);
+    head.appendChild(titleWrap);
     frag.appendChild(head);
 
-    // Image
-    const imgWrap = document.createElement("div");
-    imgWrap.className = "tt-panel-img-wrap";
+    // ── 1. Image / SVG ─────────────────────────────────────────────────────
     if (s.img_url) {
+      const imgWrap = document.createElement("div");
+      imgWrap.className = "tt-panel-img-wrap";
+      imgWrap.style.cssText = "width:100%;max-height:180px;overflow:hidden";
       const img = document.createElement("img");
-      img.className = "tt-panel-img"; img.src = s.img_url;
-      img.onerror = () => { imgWrap.removeChild(img); imgWrap.appendChild(this._colorDiv(s, "tt-panel-color")); };
+      img.src = s.img_url;
+      img.style.cssText = "width:100%;max-height:180px;object-fit:contain;display:block";
+      img.onerror = () => imgWrap.style.display = "none";
       imgWrap.appendChild(img);
-    } else {
-      imgWrap.appendChild(this._colorDiv(s, "tt-panel-color"));
+      frag.appendChild(imgWrap);
     }
-    const badges = document.createElement("div");
-    badges.className = "tt-panel-badges";
-    const b1 = document.createElement("span");
-    b1.className = "tt-panel-badge";
-    b1.style.cssText = s.is_plus ? "background:rgba(255,243,224,.9);color:#bf360c" : "background:rgba(232,245,233,.9);color:#1b5e20";
-    b1.textContent = s.is_plus ? "TigerTag+" : "TigerTag";
-    badges.appendChild(b1);
+
+
+
+    // ── ZONE FIXE : image + tags ────────────────────────────────────────
+    // ── 3. Tags (lieu, badges) ──────────────────────────────────────────────
+    const tagBar = document.createElement("div");
+    tagBar.className = "tt-panel-tags";
+    // Lieu de stockage — affiché seulement si pas dans un AMS
+    // (quand dans AMS, room = nom imprimante = redondant avec le tag AMS)
+    if (s.room && !s.ams_entity) {
+      const roomTag = document.createElement("span");
+      roomTag.className = "tt-tag tt-tag-room";
+      roomTag.textContent = s.room;
+      tagBar.appendChild(roomTag);
+    }
+    // Emplacement AMS
+    if (s.ams_entity && this._hass?.states[s.ams_entity]) {
+      const amsTag = document.createElement("span");
+      amsTag.className = "tt-tag tt-tag-ams";
+      amsTag.textContent = this._shortAmsName(s.ams_entity);
+      tagBar.appendChild(amsTag);
+    }
+    // Badges propriétés
+    const badgeDefs = [
+      [s.is_refill,   "Recharge",   "tt-tag-refill"],
+      [s.is_recycled, "Recyclé",    "tt-tag-recycled"],
+      [s.is_filled,   "Pré-chargé", "tt-tag-filled"],
+      [s.is_plus,     this._esc(s.tag_type||"TigerTag+"), "tt-tag-plus"],
+      [!s.is_plus,    this._esc(s.tag_type||"TigerTag"),  "tt-tag-base"],
+    ];
+    badgeDefs.forEach(([cond, label, cls]) => {
+      if (!cond) return;
+      const b = document.createElement("span");
+      b.className = `tt-tag ${cls}`;
+      b.innerHTML = label;
+      tagBar.appendChild(b);
+    });
+    // Twin Tag = badge séparé avec icône lien (toujours en dernier)
     if (s.has_twin) {
-      const b2 = document.createElement("span");
-      b2.className = "tt-panel-badge";
-      b2.style.cssText = "background:rgba(24,95,165,.85);color:#fff;display:flex;align-items:center;gap:3px";
-      b2.innerHTML = `<span style="width:10px;height:10px;display:inline-flex">${LINK_SVG}</span> 2 × RFID`;
-      badges.appendChild(b2);
+      const twinB = document.createElement("span");
+      twinB.className = "tt-tag tt-tag-plus";
+      twinB.style.cssText = "display:flex;align-items:center;gap:3px;background:var(--tt-blue);color:#fff;border-color:var(--tt-blue)";
+      twinB.innerHTML = `<span style="width:11px;height:11px;display:inline-flex">${LINK_SVG}</span>2×RFID`;
+      tagBar.appendChild(twinB);
     }
-    imgWrap.appendChild(badges);
-    frag.appendChild(imgWrap);
+    frag.appendChild(tagBar);
 
-    // Corps
-    const body = document.createElement("div");
-    body.className = "tt-panel-body";
+    // ── ZONE SCROLLABLE (split + températures + détails) ───────────────────
+    const scrollZone = document.createElement("div");
+    scrollZone.className = "tt-panel-scroll";
 
-    // Intro
-    const tagList = [
-      s.ams_entity && `<span class="tt-tag tt-tag-ams">${this._esc(this._shortAmsName(s.ams_entity))}</span>`,
-      s.room       && `<span class="tt-tag tt-tag-room">${this._esc(s.room)}</span>`,
-      s.is_refill  && `<span class="tt-tag tt-tag-refill">Recharge</span>`,
-      s.is_recycled&& `<span class="tt-tag tt-tag-eco">Recyclé</span>`,
-    ].filter(Boolean).join("");
-    const intro = document.createElement("div");
-    intro.innerHTML = `
-      <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:${tagList?"6":"0"}px">
-        ${this._esc(s.material)}${s.series?" · "+this._esc(s.series):""}${s.brand?" · "+this._esc(s.brand):""}${s.diameter?" · "+this._esc(s.diameter):""}
-      </div>
-      ${tagList?`<div style="display:flex;gap:4px;flex-wrap:wrap">${tagList}</div>`:""}`;
-    body.appendChild(intro);
+    // ── 4. Split Poids / Emplacement ───────────────────────────────────────
+    const splitWrap = document.createElement("div");
+    splitWrap.className = "tt-panel-split";
+    splitWrap.style.cssText = "overflow:hidden";
 
-    // ── Section Poids ──
+    // Toggle Poids / Emplacement
+    const toggleRow = document.createElement("div");
+    toggleRow.className = "tt-tabs";
+    const tabPoids = document.createElement("div");
+    tabPoids.className = "tt-tab active"; tabPoids.textContent = "⚖ Poids";
+    const tabEmpl = document.createElement("div");
+    tabEmpl.className = "tt-tab"; tabEmpl.textContent = "📍 Emplacement";
+    toggleRow.appendChild(tabPoids); toggleRow.appendChild(tabEmpl);
+    splitWrap.appendChild(toggleRow);
+
+    // Onglet Poids
+    const bodyPoids = document.createElement("div");
+    bodyPoids.className = "tt-tab-content active";
+    bodyPoids.style.cssText = "padding:12px;overflow:hidden";
+
+    // Onglet Emplacement
+    const bodyEmpl = document.createElement("div");
+    bodyEmpl.className = "tt-tab-content";
+
+    const switchTab = (i) => {
+      [tabPoids, tabEmpl].forEach((t,j) => t.classList.toggle("active", i===j));
+      [bodyPoids, bodyEmpl].forEach((b,j) => b.classList.toggle("active", i===j));
+    };
+    tabPoids.addEventListener("click", () => switchTab(0));
+    tabEmpl.addEventListener("click",  () => switchTab(1));
+
+    // Contenu onglet Poids
     const pct = this._pct(w, s.capacity);
     const bc  = this._barColor(w, s.capacity);
-    const wSec = document.createElement("div");
-    wSec.innerHTML = `<div class="tt-section-label">Poids</div>`;
-    const wBox = document.createElement("div");
-    wBox.className = "tt-weight-box";
-    // maxBrut = ce que la balance peut afficher (filament plein + tare)
     const maxBrut = s.capacity + s.tare;
-    // Valeur brute initiale = poids net actuel + tare (ce que la balance affiche)
-    const wBrut = Math.round(w) + s.tare;
+    const wBrut   = Math.round(w) + s.tare;
+
+    const wBox = document.createElement("div");
     wBox.innerHTML = `
       <div class="tt-weight-top">
         <span class="tt-weight-val" id="tt-wval">${Math.round(w)} g</span>
@@ -997,11 +1164,9 @@ class TigerTagCard extends HTMLElement {
       </div>
       <div class="tt-w-note">Tare officielle TigerTag : ${s.tare_official || 0} g — tu peux l'ajuster (masterspool différent)</div>`;
 
-    // Listeners poids — attachés directement après innerHTML, pas de rAF nécessaire
-    // wBox.querySelector fonctionne car les éléments sont déjà dans le sous-arbre wBox
-    wSec.appendChild(wBox);
-    body.appendChild(wSec);
+    bodyPoids.appendChild(wBox);
 
+    // Listeners poids
     const rng_   = wBox.querySelector("#tt-range");
     const winp_  = wBox.querySelector("#tt-winput");
     const saveB_ = wBox.querySelector("#tt-save");
@@ -1010,33 +1175,24 @@ class TigerTagCard extends HTMLElement {
     const wval_  = wBox.querySelector("#tt-wval");
     const wbar_  = wBox.querySelector("#tt-wbar");
 
-    // syncW recalcule tout depuis la tare courante (s.tare peut changer après Appliquer)
-    // updateDisplay : met à jour l'affichage sans toucher aux inputs
-    // brut = valeur brute (lecture balance), forcé = true quand on veut forcer l'input aussi
     const updateDisplay = (brut, forceInput = false) => {
       const currentTare = s.tare;
       const currentMax  = s.capacity + currentTare;
       const b   = Math.round(Math.max(currentTare, Math.min(currentMax, Number(brut))));
       const net = Math.max(0, b - currentTare);
       this._editWeight = net;
-      // Ligne du haut — poids net
       if (wval_) wval_.textContent = net + " g";
       if (wbar_) { wbar_.style.width = this._pct(net,s.capacity)+"%"; wbar_.style.background = this._barColor(net,s.capacity); }
-      // Slider : toujours synchronisé (pas actif pendant la saisie clavier)
       if (rng_ && rng_ !== document.activeElement) {
         rng_.min = currentTare; rng_.max = currentMax; rng_.value = b;
       }
-      // Input : synchronisé seulement si on force (ex: après changement tare)
-      // ou si l'input n'est pas actif — on ne touche JAMAIS à un input en cours de saisie
       if (forceInput && winp_) {
         winp_.min = currentTare; winp_.max = currentMax; winp_.value = b;
       }
-      // Labels min/max
       const labMin = wBox.querySelector("#tt-lbl-min");
       const labMax = wBox.querySelector("#tt-lbl-max");
       if (labMin) labMin.textContent = currentTare + " g (tare)";
       if (labMax) labMax.textContent = currentMax + " g (max balance)";
-      // Note de calcul
       const brutVal = wBox.querySelector("#tt-w-brut-val");
       const netVal  = wBox.querySelector("#tt-w-net-val");
       const tareVal = wBox.querySelector("#tt-w-tare-val");
@@ -1046,33 +1202,25 @@ class TigerTagCard extends HTMLElement {
       return { b, net };
     };
 
-    // Initialisation correcte du slider (doit être fait APRÈS que min/max soient fixés)
     if (rng_) { rng_.min = s.tare; rng_.max = s.capacity + s.tare; rng_.value = wBrut; }
 
-    // Slider → met à jour tout sauf l'input actif
     if (rng_) rng_.addEventListener("input", e => {
       const b = Number(e.target.value);
       if (winp_ && winp_ !== document.activeElement) winp_.value = b;
       updateDisplay(b);
     });
 
-    // Input clavier → saisie libre, on ne bloque pas pendant la frappe
-    // On met à jour l'affichage en temps réel mais sans forcer la valeur dans l'input
     if (winp_) {
       winp_.addEventListener("input", e => {
         const v = e.target.value;
-        // Si la valeur est parseable on met à jour l'affichage
         const n = Number(v);
         if (!isNaN(n) && v !== "" && v !== "-") {
           updateDisplay(n);
-          // Slider suit l'input
           if (rng_ && rng_ !== document.activeElement) {
-            const clamped = Math.max(s.tare, Math.min(s.capacity + s.tare, n));
-            rng_.value = clamped;
+            rng_.value = Math.max(s.tare, Math.min(s.capacity + s.tare, n));
           }
         }
       });
-      // À la sortie du champ → on corrige la valeur si hors limites
       winp_.addEventListener("blur", e => {
         const currentTare = s.tare;
         const currentMax  = s.capacity + currentTare;
@@ -1084,34 +1232,24 @@ class TigerTagCard extends HTMLElement {
       });
     }
 
-    // Enregistrer → relit le brut dans l'input, calcule le net et l'envoie
     if (saveB_) saveB_.addEventListener("click", async () => {
       const currentTare = s.tare;
       const currentMax  = s.capacity + currentTare;
-      // Relire la valeur brute dans l'input au moment du clic
       const brutRaw  = winp_ ? Number(winp_.value) : (s.weight + currentTare);
       const brutSafe = Math.max(currentTare, Math.min(currentMax, isNaN(brutRaw) ? currentTare : brutRaw));
-      // Poids net = ce qu'on envoie à l'API (la tare a déjà été soustraite)
       const net = Math.max(0, brutSafe - currentTare);
       updateDisplay(brutSafe, false);
-
       if (!this._hass) return;
       saveB_.disabled = true; saveB_.textContent = "Sauvegarde…";
       try {
         await this._hass.callService("tigertag", "update_spool_weight", {
-          uid: s.uid,
-          weight: net,
-          container_weight: 0,  // déjà soustrait — on envoie le poids NET
+          uid: s.uid, weight: net, container_weight: 0,
         });
-        s.weight = net;  // mise à jour locale immédiate
-      } catch(e) {
-        console.error("[TigerTagCard] saveWeight:", e);
-      } finally {
-        saveB_.disabled = false; saveB_.textContent = "Enregistrer";
-      }
+        s.weight = net;
+      } catch(e) { console.error("[TigerTagCard] saveWeight:", e); }
+      finally { saveB_.disabled = false; saveB_.textContent = "Enregistrer"; }
     });
 
-    // Tare : après Appliquer, on force la mise à jour complète avec forceInput=true
     const saveTareAndResync = async () => {
       const v = parseInt(tareI_.value);
       if (isNaN(v)) return;
@@ -1119,54 +1257,26 @@ class TigerTagCard extends HTMLElement {
       try {
         await this._hass.callService("tigertag", "set_spool_tare", { uid: s.uid, tare: v });
         s.tare = v; s.tare_custom = v;
-        // Forcer la mise à jour de l'input et du slider avec la nouvelle tare
         const brutCurrent = winp_ ? Number(winp_.value) : (this._editWeight + v);
         updateDisplay(brutCurrent, true);
         if (rng_) { rng_.min = v; rng_.max = s.capacity + v; rng_.value = brutCurrent; }
         tSave_.textContent = "Appliquer ✓";
         setTimeout(() => { tSave_.textContent = "Appliquer"; }, 1500);
-      } catch(e) {
-        console.warn("[TigerTagCard] saveTare:", e);
-        tSave_.textContent = "Appliquer";
-      }
+      } catch(e) { console.warn("[TigerTagCard] saveTare:", e); tSave_.textContent = "Appliquer"; }
     };
     if (tSave_) tSave_.addEventListener("click", saveTareAndResync);
 
-    // ── Section Emplacement ──
-    const rooms    = this._getConfigLocations();
-    const trayOpts = this._getBambuTrayOptions();
-    const locSec   = document.createElement("div");
-    locSec.innerHTML = `<div class="tt-section-label">Emplacement</div>
-      <div class="tt-loc-rows">
-        <div class="tt-loc-row">
-          <span class="tt-loc-lbl">Pièce</span>
-          <select class="tt-loc-sel" id="tt-room">
-            <option value="—">Non placée</option>
-            ${rooms.map(r=>`<option value="${r}"${s.room===r?" selected":""}>${this._esc(r)}</option>`).join("")}
-          </select>
-        </div>
-        <div class="tt-loc-row">
-          <span class="tt-loc-lbl">AMS / Ext.</span>
-          <select class="tt-loc-sel" id="tt-ams">
-            ${trayOpts.map(o=>`<option value="${o.value}"${s.ams_entity===o.value?" selected":""}>${this._esc(o.label)}</option>`).join("")}
-          </select>
-        </div>
-        ${s.ams_entity?`<button class="tt-btn-ams" id="tt-push">Envoyer la configuration vers l'imprimante ↗</button>`:""}
-      </div>`;
-    body.appendChild(locSec);
+    splitWrap.appendChild(bodyPoids);
 
-    requestAnimationFrame(() => {
-      const rs = locSec.querySelector("#tt-room");
-      const as = locSec.querySelector("#tt-ams");
-      const pb = locSec.querySelector("#tt-push");
-      if (rs) rs.addEventListener("change", e => this._setRoom(s, e.target.value));
-      if (as) as.addEventListener("change", e => this._setAms(s, e.target.value, locSec));
-      if (pb) pb.addEventListener("click",  () => this._pushToAms(s));
-    });
+    // Contenu onglet Emplacement
+    this._buildEmplacementTab(bodyEmpl, s);
+    splitWrap.appendChild(bodyEmpl);
+    scrollZone.appendChild(splitWrap);
 
-    // ── Températures ──
+    // ── 5. Paramètres d'impression ──────────────────────────────────────────
     if (s.nozzle_min || s.nozzle_max || s.bed_min || s.bed_max || s.dry_temp) {
       const tSec = document.createElement("div");
+      tSec.style.padding = "12px 12px 12px";
       tSec.innerHTML = `<div class="tt-section-label">Paramètres d'impression</div>
         <div class="tt-temp-grid">
           ${(s.nozzle_min||s.nozzle_max)?`<div class="tt-temp-chip"><div class="tt-temp-lbl">Buse</div><div class="tt-temp-val">${s.nozzle_min||"?"}–${s.nozzle_max||"?"} °C</div></div>`:""}
@@ -1174,35 +1284,62 @@ class TigerTagCard extends HTMLElement {
           ${s.dry_temp?`<div class="tt-temp-chip"><div class="tt-temp-lbl">Séchage</div><div class="tt-temp-val">${s.dry_temp} °C</div></div>`:""}
           ${s.dry_time?`<div class="tt-temp-chip"><div class="tt-temp-lbl">Durée séchage</div><div class="tt-temp-val">${s.dry_time} h</div></div>`:""}
         </div>`;
-      body.appendChild(tSec);
+      scrollZone.appendChild(tSec);
     }
 
-    // ── Liens ──
+    // ── 6. Détails ─────────────────────────────────────────────────────────
+    const detSec = document.createElement("div");
+    detSec.style.padding = "0 12px 12px";
+    const detItems = [
+      ["UID",      s.uid],
+      ["SKU",      s.sku],
+      ["Barcode",  s.barcode],
+      ["Diamètre", s.diameter ? s.diameter+" mm" : null],
+      ["Série",    s.series],
+    ].filter(([,v]) => v);
+
+    if (detItems.length) {
+      detSec.innerHTML = `<div class="tt-section-label">Détails</div>`;
+      const dl = document.createElement("dl");
+      dl.style.cssText = "display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:11px;margin:0";
+      detItems.forEach(([label, val]) => {
+        const dt = document.createElement("dt");
+        dt.style.cssText = "color:var(--secondary-text-color);white-space:nowrap";
+        dt.textContent = label;
+        const dd = document.createElement("dd");
+        dd.style.cssText = "margin:0;color:var(--primary-text-color);word-break:break-all";
+        dd.textContent = val;
+        dl.appendChild(dt); dl.appendChild(dd);
+      });
+      detSec.appendChild(dl);
+    }
+
+    // Liens
     const links = [
-      s.link_msds&&{url:s.link_msds,label:"MSDS"},
-      s.link_tds&&{url:s.link_tds,label:"TDS"},
-      s.link_rohs&&{url:s.link_rohs,label:"RoHS"},
-      s.link_reach&&{url:s.link_reach,label:"REACH"},
-      s.link_food&&{url:s.link_food,label:"Food safe"},
-      s.link_youtube&&{url:s.link_youtube,label:"Vidéo"},
-    ].filter(Boolean);
+      ["YouTube", s.link_youtube],
+      ["MSDS",    s.link_msds],
+      ["TDS",     s.link_tds],
+      ["RoHS",    s.link_rohs],
+      ["REACH",   s.link_reach],
+      ["Food",    s.link_food],
+    ].filter(([,v]) => v && v !== "--");
+
     if (links.length) {
-      const lSec = document.createElement("div");
-      lSec.innerHTML = `<div class="tt-section-label">Documents & liens</div>
-        <div class="tt-links">${links.map(l=>`<a class="tt-link-btn" href="${this._esc(l.url)}" target="_blank" rel="noopener">${l.label}</a>`).join("")}</div>`;
-      body.appendChild(lSec);
+      const linkRow = document.createElement("div");
+      linkRow.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;margin-top:8px";
+      links.forEach(([label, url]) => {
+        const a = document.createElement("a");
+        a.href = url; a.target = "_blank";
+        a.style.cssText = "font-size:10px;padding:2px 7px;border-radius:4px;border:0.5px solid var(--divider-color);color:var(--tt-green);text-decoration:none";
+        a.textContent = label;
+        linkRow.appendChild(a);
+      });
+      detSec.appendChild(linkRow);
     }
 
-    // ── Détails ──
-    const dRows = [["UID",s.uid],s.sku&&["SKU",s.sku],s.barcode&&["Code-barres",s.barcode]].filter(Boolean);
-    if (dRows.length) {
-      const dSec = document.createElement("div");
-      dSec.innerHTML = `<div class="tt-section-label">Détails</div>
-        ${dRows.map(([k,v])=>`<div class="tt-info-row"><span class="tt-info-k">${k}</span><span class="tt-info-v">${this._esc(String(v))}</span></div>`).join("")}`;
-      body.appendChild(dSec);
-    }
+    if (detItems.length || links.length) scrollZone.appendChild(detSec);
 
-    frag.appendChild(body);
+    frag.appendChild(scrollZone);
     return frag;
   }
 
@@ -1246,11 +1383,108 @@ class TigerTagCard extends HTMLElement {
     } catch(e) { console.error("[TigerTagCard] setRoom:", e); }
   }
 
-  async _setAms(s, entityId, locSec) {
-    s.ams_entity = entityId === "—" ? null : entityId;
-    // Affiche/masque le bouton push dynamiquement
-    const pb = locSec.querySelector("#tt-push");
-    if (pb) pb.style.display = s.ams_entity ? "" : "none";
+  async _setAms(s, entityId) {
+    const newAms = entityId === "—" ? null : entityId;
+    if (!this._hass) return;
+    if (newAms) {
+      const data = { uid: s.uid, tray_entity_id: newAms };
+      if (this._amsState?.profile?.tray_info_idx) {
+        data.tray_info_idx = this._amsState.profile.tray_info_idx;
+        data.profile_name  = this._amsState.profile.name;
+      }
+      try {
+        await this._hass.callService("tigertag", "set_bambu_ams_filament", data);
+        s.ams_entity = newAms;
+        this._refreshPanelTags(s);
+        this._refreshEmplacementTab(s);
+      } catch(e) { console.error("[TigerTagCard] setAms:", e); }
+    } else {
+      try {
+        await this._hass.callService("tigertag", "set_spool_room", { uid: s.uid, room: null });
+        s.ams_entity = null;
+        this._refreshPanelTags(s);
+        this._refreshEmplacementTab(s);
+      } catch(e) { console.error("[TigerTagCard] removeAms:", e); }
+    }
+  }
+
+  _refreshEmplacementTab(s) {
+    const panel = this._domPanel;
+    if (!panel) return;
+
+    panel.querySelectorAll("[data-slot-eid]").forEach(slot => {
+      const eid = slot.dataset.slotEid;
+      if (eid !== s.ams_entity) return;
+
+      // Bordure verte
+      slot.style.border = "2px solid var(--tt-green)";
+
+      // Vider et reconstruire le contenu du slot avec les données TigerTag
+      slot.innerHTML = "";
+
+      const pct = Math.round(this._pct(s.weight, s.capacity));
+      const col = s.color_hex || "#888888";
+
+      // Barre de remplissage
+      const fill = document.createElement("div");
+      fill.style.cssText = `position:absolute;bottom:0;width:100%;height:${pct}%;background:${col}22`;
+      slot.appendChild(fill);
+
+      // Pourcentage
+      const pctLbl = document.createElement("div");
+      pctLbl.style.cssText = `position:absolute;bottom:2px;width:100%;text-align:center;font-size:9px;font-weight:500;color:${col}`;
+      pctLbl.textContent = pct + "%";
+      slot.appendChild(pctLbl);
+
+      // Dot couleur
+      const dot = document.createElement("div");
+      dot.style.cssText = `position:absolute;top:5px;left:50%;transform:translateX(-50%);
+        width:11px;height:11px;border-radius:50%;background:${col};
+        border:0.5px solid var(--card-background-color)`;
+      slot.appendChild(dot);
+
+      // Le slot (bar-wrap) est children[1] du col
+      // Structure col.children : [0]=lbl(T4), [1]=slot(bar-wrap), [2]=name, [3]=badge
+      const colEl = slot.parentElement;
+      if (colEl) {
+        const nameLbl = colEl.children[2];
+        const badge   = colEl.children[3];
+        if (nameLbl) nameLbl.textContent = s.name || "—";
+        if (badge) {
+          badge.style.background = s.is_plus ? "#fff3e0" : "#e8f5e9";
+          badge.style.color      = s.is_plus ? "#bf360c" : "#1b5e20";
+          badge.textContent      = s.is_plus ? "TigerTag+" : "TigerTag";
+        }
+      }
+    });
+  }
+
+  _refreshPanelTags(s) {
+    const tagBar = this._domPanel?.querySelector(".tt-panel-tags");
+    if (!tagBar) return;
+    tagBar.innerHTML = "";
+    if (s.room && !s.ams_entity) {
+      const r = document.createElement("span");
+      r.className = "tt-tag tt-tag-room"; r.textContent = s.room;
+      tagBar.appendChild(r);
+    }
+    if (s.ams_entity && this._hass?.states[s.ams_entity]) {
+      const a = document.createElement("span");
+      a.className = "tt-tag tt-tag-ams";
+      a.textContent = this._shortAmsName(s.ams_entity);
+      tagBar.appendChild(a);
+    }
+    const t = document.createElement("span");
+    t.className = `tt-tag ${s.is_plus ? "tt-tag-plus" : "tt-tag-base"}`;
+    t.textContent = s.is_plus ? (s.tag_type || "TigerTag+") : (s.tag_type || "TigerTag");
+    tagBar.appendChild(t);
+    if (s.has_twin) {
+      const tw = document.createElement("span");
+      tw.className = "tt-tag tt-tag-plus";
+      tw.style.cssText = "display:flex;align-items:center;gap:3px;background:var(--tt-blue);color:#fff;border-color:var(--tt-blue)";
+      tw.innerHTML = `<span style="width:11px;height:11px;display:inline-flex">${LINK_SVG}</span>2×RFID`;
+      tagBar.appendChild(tw);
+    }
   }
 
   async _pushToAms(s) {
@@ -1263,7 +1497,475 @@ class TigerTagCard extends HTMLElement {
   }
 
   /* ── Utils ───────────────────────────────────────────────────────────── */
-  _shortAmsName(entityId) {
+  /* ── Onglet Emplacement ─────────────────────────────────────────────────── */
+  _buildEmplacementTab(container, s) {
+    container.style.padding = "12px";
+    container.style.flexDirection = "column";
+    container.style.gap = "14px";
+
+    // ── Lieu de stockage ──
+    const rooms = this._getConfigLocations();
+    const roomSec = document.createElement("div");
+    roomSec.innerHTML = `<div class="tt-section-label">Lieu de stockage</div>
+      <select class="tt-loc-sel" id="tt-room" style="width:100%">
+        <option value="—">Non placée</option>
+        ${rooms.map(r=>`<option value="${r}"${s.room===r?" selected":""}>${this._esc(r)}</option>`).join("")}
+      </select>`;
+    container.appendChild(roomSec);
+    requestAnimationFrame(() => {
+      const rs = roomSec.querySelector("#tt-room");
+      if (rs) rs.addEventListener("change", e => this._setRoom(s, e.target.value));
+    });
+
+    // ── Emplacement AMS ──
+    const trays = this._getBambuTrayEntities();
+    if (!trays.length) {
+      const noAms = document.createElement("div");
+      noAms.style.cssText = "font-size:12px;color:var(--secondary-text-color)";
+      noAms.textContent = "Aucune imprimante Bambu détectée";
+      container.appendChild(noAms);
+    } else {
+      const amsSec = document.createElement("div");
+      amsSec.innerHTML = `<div class="tt-section-label">Emplacement AMS / Imprimante</div>`;
+
+      // Sélecteurs imprimante + AMS en ligne
+      const selRow = document.createElement("div");
+      selRow.style.cssText = "display:flex;gap:6px;margin-bottom:10px";
+
+      const printers = [...new Set(trays.map(e => this._printerName(e.entity_id)))];
+      const initPrinter = s.ams_entity ? this._printerName(s.ams_entity) : printers[0];
+
+      const pSel = document.createElement("select");
+      pSel.className = "tt-loc-sel"; pSel.style.flex = "1";
+      printers.forEach(p => {
+        const o = document.createElement("option");
+        o.value = p; o.textContent = p;
+        if (p === initPrinter) o.selected = true;
+        pSel.appendChild(o);
+      });
+
+      // AMS groups pour l'imprimante courante
+      const getAmsGroups = (printer) => {
+        const groups = {};
+        trays.filter(e => this._printerName(e.entity_id) === printer).forEach(e => {
+          const m = e.entity_id.match(/ams_(\d+)/i);
+          const g = m ? `AMS ${m[1]}` : "Externe";
+          if (!groups[g]) groups[g] = [];
+          groups[g].push(e);
+        });
+        return groups;
+      };
+
+      const amsSel = document.createElement("select");
+      amsSel.className = "tt-loc-sel"; amsSel.style.flex = "1";
+
+      const fillAmsSel = (printer) => {
+        amsSel.innerHTML = "";
+        const groups = getAmsGroups(printer);
+        Object.keys(groups).forEach(g => {
+          const o = document.createElement("option");
+          o.value = g; o.textContent = g;
+          amsSel.appendChild(o);
+        });
+        if (s.ams_entity) {
+          const m = s.ams_entity.match(/ams_(\d+)/i);
+          const sg = m ? `AMS ${m[1]}` : "Externe";
+          amsSel.value = sg;
+        }
+      };
+      fillAmsSel(initPrinter);
+
+      selRow.appendChild(pSel);
+      selRow.appendChild(amsSel);
+      amsSec.appendChild(selRow);
+
+      // Grille des slots
+      const slotsDiv = document.createElement("div");
+      slotsDiv.id = "tt-ams-slots";
+
+      const renderSlots = (printer, amsGroup) => {
+        slotsDiv.innerHTML = "";
+        const groups = getAmsGroups(printer);
+        const items  = groups[amsGroup] || [];
+        const isExt  = amsGroup === "Externe";
+
+        const grid = document.createElement("div");
+        // Toujours 4 colonnes pour l'AMS, 1 centrée pour externe
+        const colCount = isExt ? 1 : 4;
+        grid.style.cssText = `display:grid;grid-template-columns:repeat(${colCount},1fr);gap:6px`;
+        if (isExt) { grid.style.maxWidth = "25%"; grid.style.margin = "0 auto"; }
+
+        items.forEach(e => {
+          const a = e.attributes;
+          const isCurrent = e.entity_id === s.ams_entity;
+          const isActive  = a.active;
+          const tagUid    = (a.tag_uid || "").replace(/0/g,"");
+          const hasRfid   = tagUid.length > 0;
+          const tiger     = this._allSpools().find(sp => sp.ams_entity === e.entity_id);
+          const hasTiger  = !!tiger;
+          const remain    = a.remain >= 0 ? a.remain : null;
+
+          // Couleur de la bobine dans ce slot
+          let dotColor = "var(--divider-color)";
+          let fillColor = "transparent";
+          if (hasTiger) {
+            dotColor  = tiger.color_hex || "#888";
+            fillColor = dotColor + "22";
+          } else if (hasRfid) {
+            // Bambu expose tray_color (ex: "B12333FF") ou cols[0] (ex: "#B12333FF")
+            let rawCol = a.tray_color || (a.cols && a.cols[0]) || "";
+            rawCol = rawCol.replace(/^#/, "").slice(0, 6);  // garder 6 chars hex
+            dotColor  = rawCol.length === 6 ? "#" + rawCol : "#888888";
+            fillColor = dotColor + "22";
+          }
+
+          const pct = remain !== null ? remain : (hasTiger ? Math.round(this._pct(tiger.weight, tiger.capacity)) : null);
+
+          const col = document.createElement("div");
+          col.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer";
+
+          // Numéro slot
+          const lbl = document.createElement("div");
+          const m = e.entity_id.match(/(\d+)$/);
+          lbl.style.cssText = "font-size:10px;font-weight:500;color:var(--secondary-text-color)";
+          lbl.textContent = isExt ? "Ext." : (m ? `T${m[1]}` : "?");
+
+          // Slot visuel
+          const slot = document.createElement("div");
+          slot.dataset.slotEid = e.entity_id;
+          slot.style.cssText = `
+            width:100%;border-radius:6px;height:80px;position:relative;overflow:hidden;
+            border:${isCurrent?"2px solid var(--tt-green)":"0.5px solid var(--divider-color)"};
+            background:var(--secondary-background-color);
+          `;
+
+          // Barre de remplissage (couleur bobine, hauteur = %)
+          if (pct !== null) {
+            const fill = document.createElement("div");
+            fill.style.cssText = `
+              position:absolute;bottom:0;width:100%;height:${pct}%;
+              background:${fillColor};transition:height .3s;
+            `;
+            slot.appendChild(fill);
+
+            // % affiché en bas
+            const pctLbl = document.createElement("div");
+            pctLbl.style.cssText = `
+              position:absolute;bottom:2px;width:100%;text-align:center;
+              font-size:9px;font-weight:500;color:${dotColor};
+            `;
+            pctLbl.textContent = pct + "%";
+            slot.appendChild(pctLbl);
+          } else if (!hasRfid && !hasTiger) {
+            const emptyLbl = document.createElement("div");
+            emptyLbl.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--secondary-text-color)";
+            emptyLbl.textContent = "Vide";
+            slot.appendChild(emptyLbl);
+          }
+
+          // Dot couleur en haut
+          const dot = document.createElement("div");
+          dot.style.cssText = `
+            position:absolute;top:5px;left:50%;transform:translateX(-50%);
+            width:11px;height:11px;border-radius:50%;
+            background:${dotColor};border:0.5px solid var(--card-background-color);
+          `;
+          slot.appendChild(dot);
+
+          // Icône actif
+          if (isActive) {
+            const act = document.createElement("div");
+            act.style.cssText = "position:absolute;top:2px;right:3px;font-size:8px;color:var(--tt-green)";
+            act.textContent = "▶";
+            slot.appendChild(act);
+          }
+
+          // Nom bobine
+          const name = document.createElement("div");
+          name.style.cssText = "font-size:9px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;color:var(--primary-text-color)";
+          name.textContent = hasTiger ? (tiger.name || "—") : (hasRfid ? (a.type || "Bambu") : "—");
+
+          // Badge type
+          const badge = document.createElement("div");
+          badge.style.cssText = "font-size:8px;padding:1px 4px;border-radius:3px;white-space:nowrap";
+          if (hasTiger) {
+            badge.style.background = tiger.is_plus ? "#fff3e0" : "#e8f5e9";
+            badge.style.color = tiger.is_plus ? "#bf360c" : "#1b5e20";
+            badge.textContent = tiger.is_plus ? "TigerTag+" : "TigerTag";
+          } else if (hasRfid) {
+            badge.style.background = "#f3e5f5";
+            badge.style.color = "#6a1b9a";
+            badge.textContent = "Bambu Lab";
+          } else {
+            badge.style.color = "var(--secondary-text-color)";
+            badge.textContent = "—";
+          }
+
+          col.appendChild(lbl);
+          col.appendChild(slot);
+          col.appendChild(name);
+          col.appendChild(badge);
+
+          // Clic = assigner cette bobine à ce slot
+          col.addEventListener("click", () => {
+            slotsDiv.querySelectorAll("[data-slot-selected]").forEach(el => {
+              el.style.border = "0.5px solid var(--divider-color)";
+              delete el.dataset.slotSelected;
+            });
+            slot.style.border = "2px solid var(--tt-green)";
+            slot.dataset.slotSelected = "1";
+            this._amsState.tray = e.entity_id;
+            // Activer le bouton Assigner
+            const vBtn = container.querySelector("#tt-validate-btn");
+            if (vBtn) { vBtn.disabled = false; vBtn.style.opacity = "1"; vBtn.style.cursor = "pointer"; }
+            // Charger les profils
+            this._loadProfilesForPrinter(printer, s, container);
+          });
+
+          grid.appendChild(col);
+        });
+        slotsDiv.appendChild(grid);
+      };
+
+      // Init
+      renderSlots(initPrinter, amsSel.value || Object.keys(getAmsGroups(initPrinter))[0]);
+
+      pSel.addEventListener("change", e => {
+        fillAmsSel(e.target.value);
+        renderSlots(e.target.value, amsSel.value);
+        // Charger les profils pour la nouvelle imprimante
+        setTimeout(() => this._loadProfilesForPrinter(e.target.value, s, container), 50);
+      });
+      amsSel.addEventListener("change", e => {
+        renderSlots(pSel.value, e.target.value);
+      });
+
+      amsSec.appendChild(slotsDiv);
+
+      // Bouton retirer si assignée
+      if (s.ams_entity) {
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "tt-btn-tare";
+        removeBtn.style.cssText = "color:var(--tt-red);border-color:var(--tt-red);width:100%;margin-top:6px";
+        removeBtn.textContent = "Retirer de l'AMS";
+        removeBtn.addEventListener("click", async () => {
+          await this._setAms(s, "—");
+          s.ams_entity = null;
+          removeBtn.style.display = "none";
+        });
+        amsSec.appendChild(removeBtn);
+      }
+
+      container.appendChild(amsSec);
+    }
+
+    // ── Profil filament ──
+    const profileSec = document.createElement("div");
+    profileSec.innerHTML = `<div class="tt-section-label">Profil filament Bambu</div>
+      <div id="tt-profile-list" style="font-size:11px;color:var(--secondary-text-color)">
+        Sélectionne un emplacement pour charger les profils
+      </div>`;
+    container.appendChild(profileSec);
+
+    // ── Bouton Assigner (après le profil) ──
+    const validateBtn = document.createElement("button");
+    validateBtn.className = "tt-btn-save";
+    validateBtn.style.cssText = "width:100%;margin-top:6px";
+    validateBtn.textContent = "Assigner à cet emplacement";
+    // Désactivé tant qu'aucun emplacement n'est sélectionné dans la grille
+    validateBtn.disabled = !this._amsState.tray;
+    validateBtn.style.opacity = validateBtn.disabled ? "0.4" : "1";
+    validateBtn.style.cursor  = validateBtn.disabled ? "default" : "pointer";
+    validateBtn.id = "tt-validate-btn";
+    validateBtn.addEventListener("click", async () => {
+      const tray = this._amsState.tray;
+      if (!tray) return;
+      validateBtn.disabled = true; validateBtn.textContent = "Envoi…";
+      await this._setAms(s, tray);
+      validateBtn.disabled = false; validateBtn.textContent = "Assigner à cet emplacement";
+    });
+    container.appendChild(validateBtn);
+
+    // Charger profils dès l'ouverture
+    const firstPrinter = s.ams_entity
+      ? this._printerName(s.ams_entity)
+      : (trays.length ? this._printerName(trays[0].entity_id) : null);
+    if (firstPrinter) {
+      if (s.ams_entity) this._amsState.tray = s.ams_entity;
+      setTimeout(() => this._loadProfilesForPrinter(firstPrinter, s, container), 150);
+    }
+  }
+
+  _renderTempSection(container, s, overrideTemps) {
+    // overrideTemps = {nozzle_min, nozzle_max, bed_min, bed_max, dry_temp, dry_time}
+    const nm  = overrideTemps?.nozzle_min  ?? s.nozzle_min;
+    const nM  = overrideTemps?.nozzle_max  ?? s.nozzle_max;
+    const bm  = overrideTemps?.bed_min     ?? s.bed_min;
+    const bM  = overrideTemps?.bed_max     ?? s.bed_max;
+    const dt  = overrideTemps?.dry_temp    ?? s.dry_temp;
+    const dth = overrideTemps?.dry_time    ?? s.dry_time;
+
+    if (!nm && !nM && !bm && !bM && !dt) { container.innerHTML = ""; return; }
+
+    container.innerHTML = `<div class="tt-section-label" style="margin-top:8px">Paramètres d'impression</div>
+      <div class="tt-temp-grid">
+        ${(nm||nM)?`<div class="tt-temp-chip"><div class="tt-temp-lbl">Buse</div><div class="tt-temp-val">${nm||"?"}–${nM||"?"} °C</div></div>`:""}
+        ${(bm||bM)?`<div class="tt-temp-chip"><div class="tt-temp-lbl">Plateau</div><div class="tt-temp-val">${bm||"?"}–${bM||"?"} °C</div></div>`:""}
+        ${dt?`<div class="tt-temp-chip"><div class="tt-temp-lbl">Séchage</div><div class="tt-temp-val">${dt} °C</div></div>`:""}
+        ${dth?`<div class="tt-temp-chip"><div class="tt-temp-lbl">Durée séchage</div><div class="tt-temp-val">${dth} h</div></div>`:""}
+      </div>`;
+  }
+
+  /* ── Profils filament Bambu ─────────────────────────────────────────────── */
+
+  async _loadProfilesForPrinter(printerName, s, container) {
+    const profileList = container.querySelector ? container.querySelector("#tt-profile-list") : null;
+    if (profileList) profileList.innerHTML = `<span style="color:var(--secondary-text-color)">Chargement des profils…</span>`;
+
+    const trays = this._getBambuTrayEntities()
+      .filter(e => this._printerName(e.entity_id) === printerName);
+    if (!trays.length || !this._hass) {
+      if (profileList) profileList.textContent = "Aucun tray trouvé pour " + printerName;
+      return;
+    }
+
+    // Récupérer le device_id du premier tray de cette imprimante
+    let deviceId = null;
+    try {
+      const reg = await this._hass.connection.sendMessagePromise({
+        type: "config/entity_registry/list",
+      });
+      // reg peut être un tableau ou un objet {entities: [...]}
+      const list = Array.isArray(reg) ? reg : (reg?.entities || []);
+      const entry = list.find(e => e.entity_id === trays[0].entity_id);
+      deviceId = entry?.device_id || null;
+      if (!deviceId) console.warn("[TigerTag] device_id introuvable pour", trays[0].entity_id, "dans", list.length, "entrées");
+    } catch(e) { console.warn("[TigerTag] entity_registry:", e); }
+
+    if (!deviceId) {
+      // Fallback : utiliser la table interne directement
+      if (profileList) profileList.innerHTML = `<span style="color:var(--secondary-text-color)">Profils génériques (device_id introuvable)</span>`;
+      await this._hass.callService("tigertag", "fetch_bambu_profiles", {
+        device_id: "fallback_" + printerName.toLowerCase(),
+        uid: s.uid,
+      });
+      // Utiliser le premier résultat disponible
+      await new Promise(r => setTimeout(r, 800));
+      const updated = Object.values(this._hass.states)
+        .find(e => e.entity_id === "sensor.tigertag_statistiques");
+      const allBp = updated?.attributes?.bambu_profiles || {};
+      const anyProfiles = Object.values(allBp)[0]?.profiles;
+      if (anyProfiles) { this._renderProfileList(profileList, anyProfiles, s, container); return; }
+      if (profileList) profileList.textContent = "Impossible de charger les profils";
+      return;
+    }
+
+    // Vérifier le cache dans sensor.tigertag_statistiques
+    const statsSensor = Object.values(this._hass.states)
+      .find(e => e.entity_id === "sensor.tigertag_statistiques");
+    const cached = statsSensor?.attributes?.bambu_profiles?.[deviceId];
+    // Utiliser le cache uniquement si les profils ont été scorés pour cette bobine précise
+    if (cached && cached.uid === s.uid) {
+      this._renderProfileList(profileList, cached.profiles || [], s, container);
+      return;
+    }
+
+    // Appeler le service Python
+    try {
+      await this._hass.callService("tigertag", "fetch_bambu_profiles", {
+        device_id: deviceId, uid: s.uid,
+      });
+      // Polling : attendre que le sensor se mette à jour (max 5s)
+      for (let i = 0; i < 10; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        const updated = Object.values(this._hass.states)
+          .find(e => e.entity_id === "sensor.tigertag_statistiques");
+        const p = updated?.attributes?.bambu_profiles?.[deviceId];
+        if (p) { this._renderProfileList(profileList, p.profiles || [], s, container); return; }
+      }
+      if (profileList) profileList.textContent = "Aucun profil reçu — vérifier ha-bambulab";
+    } catch(e) {
+      console.error("[TigerTag] fetchProfiles:", e);
+      if (profileList) profileList.textContent = "Erreur lors du chargement";
+    }
+  }
+
+  _renderProfileList(container, profiles, s, tabContainer) {
+    if (!container) return;
+    if (!profiles.length) {
+      container.textContent = "Aucun profil disponible";
+      return;
+    }
+    container.innerHTML = "";
+
+    // Profil sauvegardé pour cette bobine (persisté sur disque)
+    const savedIdx = s.bambu_profile_idx || null;
+
+    // Réorganiser : profil sauvegardé en premier si présent
+    let ordered = [...profiles];
+    if (savedIdx) {
+      const savedPos = ordered.findIndex(p => p.tray_info_idx === savedIdx);
+      if (savedPos > 0) {
+        const [saved] = ordered.splice(savedPos, 1);
+        ordered.unshift(saved);
+      }
+    }
+
+    // Dropdown avec idx affiché
+    const sel = document.createElement("select");
+    sel.className = "tt-loc-sel";
+    sel.style.width = "100%";
+
+    ordered.forEach((p, i) => {
+      const opt = document.createElement("option");
+      opt.value = i;
+      const isSaved = savedIdx && p.tray_info_idx === savedIdx;
+      const isTop   = i === 0 && !isSaved;
+      const label   = p.name || p.tray_info_idx || "Inconnu";
+      const idx     = p.tray_info_idx || "";
+      const suffix  = isSaved ? " 💾" : (isTop ? " ★" : "");
+      opt.textContent = `${label} (${idx})${suffix}`;
+      sel.appendChild(opt);
+    });
+    container.appendChild(sel);
+
+    // Note explicative
+    const note = document.createElement("div");
+    note.style.cssText = "font-size:10px;color:var(--secondary-text-color);margin-top:3px";
+    const noteText = savedIdx
+      ? `💾 = dernier profil utilisé · ★ = recommandé pour ${s.material||""} ${s.series||""}`
+      : `★ = recommandé pour ${s.material||""} ${s.series||""}`;
+    note.textContent = noteText;
+    container.appendChild(note);
+
+    // Listener changement profil
+    const onProfileChange = (idx) => {
+      const p = ordered[parseInt(idx)];
+      if (!p) return;
+      this._amsState.profile = p;
+      const tempSec = tabContainer?.querySelector("#tt-temp-section")
+        || this._domPanel?.querySelector("#tt-temp-section");
+      if (tempSec) {
+        this._renderTempSection(tempSec, s, {
+          nozzle_min: parseInt(p.nozzle_temp_min) || null,
+          nozzle_max: parseInt(p.nozzle_temp_max) || null,
+          bed_min:    parseInt(p.bed_temp)         || null,
+          dry_temp:   parseInt(p.drying_temp)      || null,
+          dry_time:   parseInt(p.drying_time)      || null,
+        });
+      }
+    };
+
+    sel.addEventListener("change", e => onProfileChange(e.target.value));
+
+    // Sélectionner le profil par défaut et mettre à jour les températures
+    this._amsState.profile = ordered[0];
+    onProfileChange(0);
+  }
+
+  /* Panneau AMS intégré dans les onglets du panneau principal */
+
+    _shortAmsName(entityId) {
     if (!entityId || !this._hass || !this._hass.states[entityId]) return entityId;
     const name = this._hass.states[entityId].attributes.friendly_name || entityId;
     return name.replace(/emplacement\s*/i,"T").trim();

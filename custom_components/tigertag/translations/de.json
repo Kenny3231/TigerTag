@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "TigerTag Verbindung",
+        "description": "Gib deine TigerTag-Anmeldedaten ein. Den API-Schlüssel findest du in der TigerTag Studio App.",
+        "data": {
+          "email": "E-Mail-Adresse",
+          "api_key": "API-Schlüssel"
+        }
+      },
+      "locations": {
+        "title": "Lagerorte",
+        "description": "Definiere deine Lagerorte durch Kommas getrennt (z.B. {example}).",
+        "data": {
+          "locations_raw": "Lagerorte"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Ungültiger API-Schlüssel oder E-Mail-Adresse.",
+      "cannot_connect": "Verbindung zur TigerTag API fehlgeschlagen.",
+      "no_locations": "Bitte definiere mindestens einen Lagerort.",
+      "unknown": "Unbekannter Fehler. Überprüfe die Protokolle für weitere Details."
+    },
+    "abort": {
+      "already_configured": "Dieses TigerTag-Konto ist bereits konfiguriert."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Lagerorte bearbeiten",
+        "description": "Bearbeite deine Lagerorte durch Kommas getrennt (z.B. {example}).",
+        "data": {
+          "locations_raw": "Lagerorte"
+        }
+      }
+    },
+    "error": {
+      "no_locations": "Bitte definiere mindestens einen Lagerort."
+    }
+  }
+}

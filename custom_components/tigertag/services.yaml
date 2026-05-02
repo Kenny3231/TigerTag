@@ -1,6 +1,6 @@
 update_spool_weight:
   name: "Mettre à jour le poids d'une bobine"
-  description: "Met à jour le poids restant d'une bobine TigerTag via son UID."
+  description: "Met à jour le poids restant d'une bobine TigerTag via son UID. Si la bobine a un Twin Tag, les deux puces sont mises à jour simultanément."
   fields:
     uid:
       name: "UID de la bobine"
@@ -9,8 +9,8 @@ update_spool_weight:
       selector:
         text:
     weight:
-      name: "Poids (grammes)"
-      description: "Poids total restant sur la bobine, en grammes."
+      name: "Poids net (grammes)"
+      description: "Poids de filament restant, en grammes (sans la tare)."
       required: true
       selector:
         number:
@@ -21,7 +21,7 @@ update_spool_weight:
           mode: box
     container_weight:
       name: "Poids du support (grammes)"
-      description: "Poids de la bobine vide. Sera déduit côté serveur si renseigné. Défaut : 0."
+      description: "Poids de la bobine vide. Mettre 0 si déjà déduit. Défaut : 0."
       required: false
       default: 0
       selector:
@@ -33,43 +33,85 @@ update_spool_weight:
           mode: box
 
 set_bambu_ams_filament:
-  name: "Définir un filament dans l'AMS Bambu Lab"
-  description: >
-    Envoie les informations d'une bobine TigerTag vers l'AMS d'une imprimante
-    Bambu Lab via MQTT. L'emplacement est automatiquement mémorisé dans l'attribut
-    'ams_location' de l'entité bobine.
+  name: "Assigner une bobine à un emplacement AMS"
+  description: "Envoie les informations d'une bobine TigerTag vers un emplacement AMS d'une imprimante Bambu Lab. Le lieu de stockage est automatiquement mis à jour."
   fields:
     uid:
       name: "UID de la bobine"
-      description: "Identifiant de la bobine TigerTag (visible dans les attributs de l'entité)."
+      description: "Identifiant de la bobine TigerTag."
       required: true
       selector:
         text:
-    ams_id:
-      name: "ID de l'AMS"
-      description: "Numéro de l'AMS cible (0 = premier AMS)."
-      required: true
-      default: 0
-      selector:
-        number:
-          min: 0
-          max: 3
-          step: 1
-          mode: box
-    tray_id:
-      name: "Numéro d'emplacement (Tray)"
-      description: "Position dans l'AMS, de 0 (gauche) à 3 (droite)."
+    tray_entity_id:
+      name: "Entité de l'emplacement AMS"
+      description: "Entity ID du sensor tray Bambu Lab (ex: sensor.p2s_ams_1_emplacement_1)."
       required: true
       selector:
-        number:
-          min: 0
-          max: 3
-          step: 1
-          mode: box
-    mqtt_topic:
-      name: "Topic MQTT Bambu Lab"
-      description: "Topic de requête de l'imprimante, au format : device/<SERIAL>/request"
-      required: true
-      example: "device/00E001234567/request"
+        entity:
+          domain: sensor
+    tray_info_idx:
+      name: "Profil filament Bambu (optionnel)"
+      description: "Code du profil filament Bambu Lab (ex: GFL96). Si absent, le profil générique du matériau est utilisé."
+      required: false
       selector:
         text:
+
+set_spool_room:
+  name: "Définir le lieu de stockage d'une bobine"
+  description: "Associe une bobine à un lieu de stockage (Garage, Bureau, etc.)."
+  fields:
+    uid:
+      name: "UID de la bobine"
+      description: "Identifiant de la bobine TigerTag."
+      required: true
+      selector:
+        text:
+    room:
+      name: "Lieu de stockage"
+      description: "Nom du lieu (doit correspondre aux lieux configurés dans l'intégration). Laisser vide pour retirer."
+      required: false
+      selector:
+        text:
+
+set_spool_tare:
+  name: "Définir la tare d'une bobine"
+  description: "Définit le poids de la bobine vide (masterspool). Permet d'ajuster si le masterspool est différent du poids officiel TigerTag."
+  fields:
+    uid:
+      name: "UID de la bobine"
+      description: "Identifiant de la bobine TigerTag."
+      required: true
+      selector:
+        text:
+    tare:
+      name: "Tare (grammes)"
+      description: "Poids de la bobine vide en grammes."
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 2000
+          step: 1
+          unit_of_measurement: g
+          mode: box
+
+fetch_bambu_profiles:
+  name: "Récupérer les profils filament Bambu"
+  description: "Récupère et score les profils filament disponibles sur l'imprimante pour une bobine TigerTag. Résultat stocké dans sensor.tigertag_statistiques."
+  fields:
+    device_id:
+      name: "ID de l'appareil Bambu Lab"
+      description: "Device ID de l'imprimante Bambu Lab dans Home Assistant."
+      required: true
+      selector:
+        text:
+    uid:
+      name: "UID de la bobine"
+      description: "Identifiant de la bobine TigerTag pour le matching de profil."
+      required: true
+      selector:
+        text:
+
+refresh:
+  name: "Rafraîchir l'inventaire TigerTag"
+  description: "Force une mise à jour immédiate de l'inventaire TigerTag depuis l'API."
