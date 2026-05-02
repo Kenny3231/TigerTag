@@ -82,9 +82,9 @@ class TigerTagSpoolSensor(CoordinatorEntity[TigerTagDataUpdateCoordinator], Sens
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
-            name="TigerTag", manufacturer="TigerTag Project",
+            name="TigerTag Studio", manufacturer="TigerTag Project",
             model="Inventory Manager", sw_version="2.0",
-            configuration_url="https://tigertag.io/",
+            configuration_url="https://app.tigertag.io",
         )
 
     @property
@@ -179,6 +179,9 @@ class TigerTagSpoolSensor(CoordinatorEntity[TigerTagDataUpdateCoordinator], Sens
             "product_name":  clean_value(d.get("name") or d.get("color_name")),
             "color_name":    clean_value(d.get("color_name") or d.get("name") or d.get("message")),
             "color_hex":     f"#{r:02x}{g:02x}{b:02x}",
+            # Couleurs secondaires (bicolor, tricolor) depuis les champs RFID
+            "color_hex2":    f"#{int(d.get('color_r2',0)):02x}{int(d.get('color_g2',0)):02x}{int(d.get('color_b2',0)):02x}" if d.get("color_r2") else None,
+            "color_hex3":    f"#{int(d.get('color_r3',0)):02x}{int(d.get('color_g3',0)):02x}{int(d.get('color_b3',0)):02x}" if d.get("color_r3") else None,
             "aspect1":       self._ref("aspect", d.get("id_aspect1") or d.get("id_aspect")),
             "aspect2":       self._ref("aspect", d.get("id_aspect2")),
             # Spécifications
@@ -212,6 +215,12 @@ class TigerTagSpoolSensor(CoordinatorEntity[TigerTagDataUpdateCoordinator], Sens
             "link_rohs":    clean_value(d.get("LinkROHS")),
             "link_reach":   clean_value(d.get("LinkREACH")),
             "link_food":    clean_value(d.get("LinkFOOD")),
+            # Couleurs étendues
+            "online_color_list": d.get("online_color_list") or [],
+            "online_color_type": d.get("online_color_type"),
+            # Dates (epoch seconds après nettoyage Firestore dans api.py)
+            "updated_at":  d.get("updated_at"),   # dernière modif (epoch s)
+            "last_update": d.get("last_update"),   # dernière sync  (epoch ms → on divise)
             # Emplacements
             "ams_location":    coord.get_location(self._uid),
             "room_location":   coord.get_room(self._uid),

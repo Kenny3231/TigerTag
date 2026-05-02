@@ -220,6 +220,44 @@ input[type=range].tt-range { width: 100%; margin: 0 0 8px; cursor: pointer; acce
 .tt-info-v { color: var(--primary-text-color); font-weight: 500; text-align: right; max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .tt-empty { grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--secondary-text-color); font-size: 13px; }
+
+/* ── Toggle vue ── */
+.tt-view-toggle { display:flex; gap:4px; flex-shrink:0; }
+.tt-view-btn {
+  height:36px; padding:0 10px; border-radius:8px; border:1px solid var(--divider-color);
+  background:transparent; color:var(--secondary-text-color); cursor:pointer;
+  display:flex; align-items:center; gap:5px; font-size:12px; transition:all .12s;
+}
+.tt-view-btn:hover  { border-color:var(--tt-green); color:var(--tt-green); }
+.tt-view-btn.active { background:var(--tt-green); color:#fff; border-color:var(--tt-green); }
+.tt-view-btn svg    { width:14px; height:14px; }
+
+/* ── Table ── */
+.tt-table-wrap { padding:0 16px 16px; overflow-x:auto; }
+table.tt-table {
+  width:100%; border-collapse:collapse; font-size:12px;
+}
+table.tt-table th {
+  text-align:left; padding:8px 10px; font-size:10px; font-weight:500;
+  color:var(--secondary-text-color); text-transform:uppercase; letter-spacing:.05em;
+  border-bottom:1px solid var(--divider-color); cursor:pointer; white-space:nowrap;
+  user-select:none;
+}
+table.tt-table th:hover { color:var(--tt-green); }
+table.tt-table th .tt-sort-icon { display:inline-block; margin-left:3px; opacity:.4; }
+table.tt-table th.sorted .tt-sort-icon { opacity:1; color:var(--tt-green); }
+table.tt-table td {
+  padding:8px 10px; border-bottom:1px solid var(--divider-color);
+  color:var(--primary-text-color); vertical-align:middle;
+}
+table.tt-table tr:last-child td { border-bottom:none; }
+table.tt-table tr:hover td { background:var(--secondary-background-color); cursor:pointer; }
+table.tt-table tr.selected td { background:color-mix(in srgb,var(--tt-green) 8%,transparent); }
+table.tt-table tr.low-stock td { color:var(--tt-red); }
+.tt-table-img { width:32px; height:32px; border-radius:6px; object-fit:cover; }
+.tt-table-color { width:32px; height:32px; border-radius:6px; }
+.tt-table-bar { height:3px; border-radius:2px; background:var(--divider-color); margin-top:3px; min-width:60px; }
+.tt-table-bar-fill { height:100%; border-radius:2px; }
 `;
 
 class TigerTagCard extends HTMLElement {
@@ -235,10 +273,16 @@ class TigerTagCard extends HTMLElement {
     this._initialized = false;
     this._refreshing  = false;
     this._domGrid = this._domOverlay = this._domPanel = this._domFilters = null;
+    this._viewMode = 'grid';   // sera mis à jour par setConfig
+    this._sortCol  = 'name';   // colonne de tri courante
+    this._sortDir  = 1;        // 1=asc -1=desc
+    this._domTable = null;
   }
 
   setConfig(cfg) {
-    this._config = { title: cfg.title || null };
+    this._config   = { title: cfg.title || null, defaultView: cfg.default_view || 'grid' };
+    // Initialiser le mode vue depuis la config — setConfig est appelé avant _initDOM
+    this._viewMode = this._config.defaultView;
   }
   static getStubConfig() { return { type: "custom:tigertag-card" }; }
 
@@ -310,6 +354,28 @@ class TigerTagCard extends HTMLElement {
     refreshBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`;
     refreshBtn.addEventListener("click", () => this._doRefresh(refreshBtn));
     tb.appendChild(refreshBtn);
+
+    // Toggle Grille / Tableau
+    const viewToggle = document.createElement("div");
+    viewToggle.className = "tt-view-toggle";
+
+    const btnGrid = document.createElement("button");
+    btnGrid.className = "tt-view-btn" + (this._viewMode==='grid'?" active":"");
+    btnGrid.title = "Vue grille";
+    btnGrid.innerHTML = `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="8" y="1" width="5" height="5" rx="1"/><rect x="1" y="8" width="5" height="5" rx="1"/><rect x="8" y="8" width="5" height="5" rx="1"/></svg><span>Grille</span>`;
+    btnGrid.addEventListener("click", () => { this._viewMode="grid"; btnGrid.classList.add("active"); btnTable.classList.remove("active"); this._renderGrid(); });
+
+    const btnTable = document.createElement("button");
+    btnTable.className = "tt-view-btn" + (this._viewMode==='table'?" active":"");
+    btnTable.title = "Vue tableau";
+    btnTable.innerHTML = `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="12" height="3" rx="1"/><rect x="1" y="6" width="12" height="3" rx="1"/><rect x="1" y="11" width="12" height="3" rx="1"/></svg><span>Tableau</span>`;
+    btnTable.addEventListener("click", () => { this._viewMode="table"; btnTable.classList.add("active"); btnGrid.classList.remove("active"); this._renderGrid(); });
+
+    this._btnGrid  = btnGrid;
+    this._btnTable = btnTable;
+    viewToggle.appendChild(btnGrid);
+    viewToggle.appendChild(btnTable);
+    tb.appendChild(viewToggle);
     root.appendChild(tb);
 
     // Filtres
@@ -324,6 +390,13 @@ class TigerTagCard extends HTMLElement {
     this._domGrid.className = "tt-grid";
     gw.appendChild(this._domGrid);
     root.appendChild(gw);
+
+    // Table
+    const tw = document.createElement("div");
+    tw.className = "tt-table-wrap";
+    tw.style.display = "none";
+    this._domTable = tw;
+    root.appendChild(tw);
 
     // Overlay
     this._domOverlay = document.createElement("div");
@@ -389,6 +462,12 @@ class TigerTagCard extends HTMLElement {
       series:       a.series || "",
       color_hex:    a.color_hex || "#888888",
       img_url:      (a.img_url && a.img_url !== "--") ? a.img_url : null,
+      color_list:   a.online_color_list || [],
+      color_type:   a.online_color_type || "",
+      color_hex2:   a.color_hex2 || null,
+      color_hex3:   a.color_hex3 || null,
+      aspect1:      a.aspect1 || "",
+      aspect2:      a.aspect2 || "",
       is_plus:      !!a.is_plus,
       has_twin:     !!a.has_twin,
       twin_uid:     a.twin_uid || null,
@@ -416,6 +495,10 @@ class TigerTagCard extends HTMLElement {
       sku:          a.sku || null,
       barcode:      a.barcode || null,
       diameter:     a.diameter || null,
+      // updated_at = epoch seconds, last_update = epoch ms (selon l'API TigerTag)
+      // On normalise tout en epoch seconds pour _relTime
+      last_update:  a.updated_at
+                    || (a.last_update ? Math.round(a.last_update / 1000) : null),
     };
   }
 
@@ -446,18 +529,269 @@ class TigerTagCard extends HTMLElement {
     });
   }
 
-  /* ── Grille ──────────────────────────────────────────────────────────── */
+  /* ── Rendu (grille ou tableau selon le mode) ──────────────────────── */
   _renderGrid() {
     if (!this._domGrid) return;
-    this._buildFilters(); // met à jour les lieux si changés
+    this._buildFilters();
     const spools = this._filtered();
     const thr    = 250;
-    this._domGrid.innerHTML = "";
-    if (!spools.length) {
-      this._domGrid.innerHTML = `<div class="tt-empty">Aucune bobine trouvée</div>`;
+
+    if (this._viewMode === 'table') {
+      this._domGrid.parentElement.style.display  = "none";
+      this._domTable.style.display = "";
+      this._renderTable(spools, thr);
+    } else {
+      this._domGrid.parentElement.style.display  = "";
+      this._domTable.style.display = "none";
+      this._domGrid.innerHTML = "";
+      if (!spools.length) {
+        this._domGrid.innerHTML = `<div class="tt-empty">Aucune bobine trouvée</div>`;
+        return;
+      }
+      spools.forEach(s => this._domGrid.appendChild(this._spoolCard(s, thr)));
+    }
+  }
+
+  /* ── Vue Tableau ─────────────────────────────────────────────────────── */
+  _renderTable(spools, thr) {
+    const cols = [
+      { key:"img",      label:"",           sortable:false },
+      { key:"type",     label:"Type",       sortable:true  },
+      { key:"material", label:"Matériau",   sortable:true  },
+      { key:"brand",    label:"Marque",     sortable:true  },
+      { key:"color",    label:"Couleur",    sortable:false },
+      { key:"name",     label:"Nom",        sortable:true  },
+      { key:"weight",   label:"Poids dispo.",sortable:true  },
+      { key:"capacity", label:"Capacité",   sortable:true  },
+      { key:"room",     label:"Lieu",       sortable:true  },
+      { key:"updated",  label:"Màj",        sortable:true  },
+    ];
+
+    // Tri
+    const sorted = [...spools].sort((a,b) => {
+      let av = this._sortVal(a, this._sortCol);
+      let bv = this._sortVal(b, this._sortCol);
+      if (av < bv) return -this._sortDir;
+      if (av > bv) return  this._sortDir;
+      return 0;
+    });
+
+    this._domTable.innerHTML = "";
+    if (!sorted.length) {
+      this._domTable.innerHTML = `<div class="tt-empty">Aucune bobine trouvée</div>`;
       return;
     }
-    spools.forEach(s => this._domGrid.appendChild(this._spoolCard(s, thr)));
+
+    const table = document.createElement("table");
+    table.className = "tt-table";
+
+    // En-tête
+    const thead = document.createElement("thead");
+    const hr = document.createElement("tr");
+    cols.forEach(col => {
+      const th = document.createElement("th");
+      th.dataset.col = col.key;
+      if (col.sortable) {
+        const isSorted = this._sortCol === col.key;
+        th.className = isSorted ? "sorted" : "";
+        th.innerHTML = `${col.label}<span class="tt-sort-icon">${isSorted ? (this._sortDir===1?"↑":"↓") : "↕"}</span>`;
+        th.addEventListener("click", () => {
+          if (this._sortCol === col.key) this._sortDir *= -1;
+          else { this._sortCol = col.key; this._sortDir = 1; }
+          this._renderGrid();
+        });
+      } else {
+        th.textContent = col.label;
+      }
+      hr.appendChild(th);
+    });
+    thead.appendChild(hr);
+    table.appendChild(thead);
+
+    // Corps
+    const tbody = document.createElement("tbody");
+    sorted.forEach(s => {
+      const tr = document.createElement("tr");
+      if (s.entity_id === this._selected) tr.classList.add("selected");
+      if (s.weight < thr && s.weight >= 0) tr.classList.add("low-stock");
+
+      // Image — photo officielle ou SVG bobine coloré (data URL)
+      const tdImg = document.createElement("td");
+      if (s.img_url) {
+        const img = document.createElement("img");
+        img.className = "tt-table-img"; img.src = s.img_url; img.loading = "lazy";
+        img.onerror = () => { tdImg.innerHTML=""; tdImg.appendChild(this._tableColorDiv(s)); };
+        tdImg.appendChild(img);
+      } else {
+        tdImg.appendChild(this._tableColorDiv(s));
+      }
+      tr.appendChild(tdImg);
+
+      // Type (badge TigerTag / TigerTag+)
+      const tdType = document.createElement("td");
+      const badge = document.createElement("span");
+      badge.className = "tt-tag " + (s.is_plus ? "tt-tag-plus" : "tt-tag-base");
+      badge.textContent = s.is_plus ? "TigerTag+" : "TigerTag";
+      tdType.appendChild(badge);
+      tr.appendChild(tdType);
+
+      // Matériau
+      const tdMat = document.createElement("td");
+      tdMat.textContent = s.material || "—";
+      tr.appendChild(tdMat);
+
+      // Marque
+      const tdBrand = document.createElement("td");
+      tdBrand.textContent = s.brand || "—";
+      tr.appendChild(tdBrand);
+
+      // Couleur — cercle mono ou dégradé conique si multicolore
+      const tdColor = document.createElement("td");
+      const colorDot = document.createElement("div");
+      colorDot.style.cssText = "width:22px;height:22px;border-radius:50%;border:1px solid var(--divider-color)";
+      colorDot.style.background = this._colorBackground(s);
+      tdColor.appendChild(colorDot);
+      tr.appendChild(tdColor);
+
+      // Nom
+      const tdName = document.createElement("td");
+      tdName.style.fontWeight = "500";
+      tdName.textContent = s.name || "—";
+      tr.appendChild(tdName);
+
+      // Poids avec mini barre
+      const tdW = document.createElement("td");
+      const pct = this._pct(s.weight, s.capacity);
+      const bc  = this._barColor(s.weight, s.capacity);
+      tdW.innerHTML = `${Math.round(s.weight)} g<div class="tt-table-bar"><div class="tt-table-bar-fill" style="width:${pct}%;background:${bc}"></div></div>`;
+      tr.appendChild(tdW);
+
+      // Capacité
+      const tdCap = document.createElement("td");
+      tdCap.textContent = s.capacity + " g";
+      tr.appendChild(tdCap);
+
+      // Lieu
+      const tdRoom = document.createElement("td");
+      if (s.ams_entity && this._hass?.states[s.ams_entity]) {
+        const n = this._shortAmsName(s.ams_entity);
+        tdRoom.innerHTML = `<span class="tt-tag tt-tag-ams">${this._esc(n)}</span>`;
+      } else if (s.room) {
+        tdRoom.innerHTML = `<span class="tt-tag tt-tag-room">${this._esc(s.room)}</span>`;
+      } else {
+        tdRoom.innerHTML = `<span style="color:var(--secondary-text-color);font-size:11px">—</span>`;
+      }
+      tr.appendChild(tdRoom);
+
+      // Màj (last_update timestamp → durée relative)
+      const tdUpd = document.createElement("td");
+      tdUpd.style.color = "var(--secondary-text-color)";
+      tdUpd.textContent = s.last_update ? this._relTime(s.last_update) : "—";
+      tr.appendChild(tdUpd);
+
+      tr.addEventListener("click", () => this._openPanel(s));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    this._domTable.appendChild(table);
+  }
+
+  _sortVal(s, col) {
+    switch(col) {
+      case "name":     return (s.name||"").toLowerCase();
+      case "material": return (s.material||"").toLowerCase();
+      case "brand":    return (s.brand||"").toLowerCase();
+      case "weight":   return s.weight;
+      case "capacity": return s.capacity;
+      case "room":     return (s.room||s.ams_entity||"").toLowerCase();
+      case "type":     return s.is_plus ? 0 : 1;
+      case "updated":  return s.last_update || 0;
+      default:         return "";
+    }
+  }
+
+  _relTime(ts) {
+    const diff = Math.round((Date.now()/1000) - ts);
+    if (diff < 60)   return diff + "s";
+    if (diff < 3600) return Math.round(diff/60) + "m";
+    if (diff < 86400)return Math.round(diff/3600) + "h";
+    return Math.round(diff/86400) + "j";
+  }
+
+  _tableColorDiv(s) {
+    const d = document.createElement("div");
+    d.className = "tt-table-color";
+    d.style.cssText = "width:24px;height:24px;border-radius:50%;border:1px solid var(--divider-color)";
+    d.style.background = this._colorBackground(s);
+    return d;
+  }
+
+  _colorBackground(s) {
+    // Logique calquée sur l'app officielle TigerTag Studio Manager
+    const aspects = [s.aspect1, s.aspect2].map(a => (a || "").toLowerCase());
+    const isRainbow  = aspects.some(a => a.includes("rainbow")  || a.includes("multicolor"));
+    const isTricolor = aspects.some(a => a.includes("tricolor") || a.includes("tri color") || a.includes("tricolore"));
+    const isBicolor  = aspects.some(a => a.includes("bicolor")  || a.includes("bi color")  || a.includes("bicolore"));
+
+    // Normalise une couleur #RRGGBBAA ou #RRGGBB → #RRGGBB valide pour CSS
+    const norm = c => {
+      const s2 = (c || "").trim().replace(/^#/, "");
+      const h6  = s2.length === 8 ? s2.slice(0, 6) : s2;
+      return /^[0-9a-fA-F]{6}$/.test(h6) ? "#" + h6 : null;
+    };
+
+    const cls       = (s.color_list || []).map(norm).filter(Boolean);
+    const colorType = s.color_type || "";
+
+    // Priorité 1 : online_color_list avec type explicite
+    if (cls.length >= 2 && colorType === "conic_gradient") {
+      // Boucle fermée : on répète la 1ère couleur à la fin pour un dégradé lisse
+      return `conic-gradient(from 0deg, ${cls.join(", ")}, ${cls[0]})`;
+    }
+    if (cls.length >= 2 && colorType === "gradient") {
+      return `linear-gradient(90deg, ${cls.join(", ")})`;
+    }
+    if (cls.length >= 2) {
+      // Plusieurs couleurs sans type → dégradé conique avec parts égales
+      const step = 360 / cls.length;
+      const stops = cls.map((c, i) => `${c} ${i*step}deg ${(i+1)*step}deg`).join(", ");
+      return `conic-gradient(${stops})`;
+    }
+    if (cls.length === 1) {
+      return cls[0]; // online_color_list mono → priorité sur la couleur RFID
+    }
+
+    // Priorité 2 : aspects + couleurs RGB du chip RFID
+    const c1 = s.color_hex  || null;
+    const c2 = s.color_hex2 || null;
+    const c3 = s.color_hex3 || null;
+    const rfidColors = [c1, c2, c3].filter(Boolean);
+
+    if (isRainbow && isTricolor) {
+      const [r1="#ff4d4d", r2="#ffd93d", r3="#4da3ff"] = rfidColors;
+      return `linear-gradient(90deg, ${r1} 0%, ${r2} 50%, ${r3} 100%)`;
+    }
+    if (isRainbow && isBicolor) {
+      const [r1="#ff7a00", r2="#8a2be2"] = rfidColors;
+      return `linear-gradient(90deg, ${r1} 0%, ${r2} 100%)`;
+    }
+    if (isRainbow) {
+      if (rfidColors.length >= 2) return `linear-gradient(90deg, ${rfidColors.join(", ")})`;
+      if (rfidColors.length === 1) return rfidColors[0];
+      return "linear-gradient(90deg, #ff0000, #ff8800, #ffff00, #00cc00, #0000ff, #8b00ff)";
+    }
+    if (isTricolor) {
+      const [t1="#cccccc", t2="#888888", t3] = rfidColors;
+      const _t3 = t3 || t1;
+      return `conic-gradient(${t1} 0deg 120deg, ${t2} 120deg 240deg, ${_t3} 240deg 360deg)`;
+    }
+    if (isBicolor) {
+      const [b1="#cccccc", b2="#ffffff"] = rfidColors;
+      return `conic-gradient(${b1} 0deg 180deg, ${b2} 180deg 360deg)`;
+    }
+
+    // Fallback : couleur principale
+    return s.color_hex || "#888888";
   }
 
   _syncPanelWeight() {
@@ -469,10 +803,13 @@ class TigerTagCard extends HTMLElement {
     const range = this._domPanel.querySelector("#tt-range");
     const winp  = this._domPanel.querySelector("#tt-winput");
     if (!wval) return;
+    // Ligne du haut = poids NET
     wval.textContent = Math.round(s.weight) + " g";
     if (wbar) { wbar.style.width = this._pct(s.weight, s.capacity) + "%"; wbar.style.background = this._barColor(s.weight, s.capacity); }
-    if (range && range !== document.activeElement) range.value = s.weight;
-    if (winp  && winp  !== document.activeElement) winp.value  = Math.round(s.weight);
+    // Slider et input = poids BRUT (net + tare)
+    const wBrut = Math.round(s.weight) + (s.tare || 0);
+    if (range && range !== document.activeElement) range.value = wBrut;
+    if (winp  && winp  !== document.activeElement) winp.value  = wBrut;
   }
 
   /* ── Carte bobine ────────────────────────────────────────────────────── */
@@ -674,32 +1011,107 @@ class TigerTagCard extends HTMLElement {
     const wbar_  = wBox.querySelector("#tt-wbar");
 
     // syncW recalcule tout depuis la tare courante (s.tare peut changer après Appliquer)
-    const syncW = (brut) => {
+    // updateDisplay : met à jour l'affichage sans toucher aux inputs
+    // brut = valeur brute (lecture balance), forcé = true quand on veut forcer l'input aussi
+    const updateDisplay = (brut, forceInput = false) => {
       const currentTare = s.tare;
       const currentMax  = s.capacity + currentTare;
-      const b = Math.round(Math.max(currentTare, Math.min(currentMax, Number(brut))));
+      const b   = Math.round(Math.max(currentTare, Math.min(currentMax, Number(brut))));
       const net = Math.max(0, b - currentTare);
       this._editWeight = net;
+      // Ligne du haut — poids net
       if (wval_) wval_.textContent = net + " g";
       if (wbar_) { wbar_.style.width = this._pct(net,s.capacity)+"%"; wbar_.style.background = this._barColor(net,s.capacity); }
-      if (rng_  && rng_  !== document.activeElement) { rng_.min  = currentTare; rng_.max  = currentMax; rng_.value = b; }
-      if (winp_ && winp_ !== document.activeElement) { winp_.min = currentTare; winp_.max = currentMax; winp_.value = b; }
-      // Mettre à jour les labels min/max sous le slider
+      // Slider : toujours synchronisé (pas actif pendant la saisie clavier)
+      if (rng_ && rng_ !== document.activeElement) {
+        rng_.min = currentTare; rng_.max = currentMax; rng_.value = b;
+      }
+      // Input : synchronisé seulement si on force (ex: après changement tare)
+      // ou si l'input n'est pas actif — on ne touche JAMAIS à un input en cours de saisie
+      if (forceInput && winp_) {
+        winp_.min = currentTare; winp_.max = currentMax; winp_.value = b;
+      }
+      // Labels min/max
       const labMin = wBox.querySelector("#tt-lbl-min");
       const labMax = wBox.querySelector("#tt-lbl-max");
       if (labMin) labMin.textContent = currentTare + " g (tare)";
       if (labMax) labMax.textContent = currentMax + " g (max balance)";
-      // Note de calcul : toujours visible
+      // Note de calcul
       const brutVal = wBox.querySelector("#tt-w-brut-val");
       const netVal  = wBox.querySelector("#tt-w-net-val");
       const tareVal = wBox.querySelector("#tt-w-tare-val");
       if (brutVal) brutVal.textContent = b;
       if (netVal)  netVal.textContent  = net;
       if (tareVal) tareVal.textContent = currentTare;
+      return { b, net };
     };
 
-    // syncTare : appelé après Appliquer — met à jour s.tare puis resynchronise
-    const _origSaveTare = this._saveTare.bind(this);
+    // Initialisation correcte du slider (doit être fait APRÈS que min/max soient fixés)
+    if (rng_) { rng_.min = s.tare; rng_.max = s.capacity + s.tare; rng_.value = wBrut; }
+
+    // Slider → met à jour tout sauf l'input actif
+    if (rng_) rng_.addEventListener("input", e => {
+      const b = Number(e.target.value);
+      if (winp_ && winp_ !== document.activeElement) winp_.value = b;
+      updateDisplay(b);
+    });
+
+    // Input clavier → saisie libre, on ne bloque pas pendant la frappe
+    // On met à jour l'affichage en temps réel mais sans forcer la valeur dans l'input
+    if (winp_) {
+      winp_.addEventListener("input", e => {
+        const v = e.target.value;
+        // Si la valeur est parseable on met à jour l'affichage
+        const n = Number(v);
+        if (!isNaN(n) && v !== "" && v !== "-") {
+          updateDisplay(n);
+          // Slider suit l'input
+          if (rng_ && rng_ !== document.activeElement) {
+            const clamped = Math.max(s.tare, Math.min(s.capacity + s.tare, n));
+            rng_.value = clamped;
+          }
+        }
+      });
+      // À la sortie du champ → on corrige la valeur si hors limites
+      winp_.addEventListener("blur", e => {
+        const currentTare = s.tare;
+        const currentMax  = s.capacity + currentTare;
+        const n = Number(e.target.value);
+        const clamped = isNaN(n) ? currentTare : Math.max(currentTare, Math.min(currentMax, n));
+        winp_.value = clamped;
+        updateDisplay(clamped, false);
+        if (rng_) { rng_.min = currentTare; rng_.max = currentMax; rng_.value = clamped; }
+      });
+    }
+
+    // Enregistrer → relit le brut dans l'input, calcule le net et l'envoie
+    if (saveB_) saveB_.addEventListener("click", async () => {
+      const currentTare = s.tare;
+      const currentMax  = s.capacity + currentTare;
+      // Relire la valeur brute dans l'input au moment du clic
+      const brutRaw  = winp_ ? Number(winp_.value) : (s.weight + currentTare);
+      const brutSafe = Math.max(currentTare, Math.min(currentMax, isNaN(brutRaw) ? currentTare : brutRaw));
+      // Poids net = ce qu'on envoie à l'API (la tare a déjà été soustraite)
+      const net = Math.max(0, brutSafe - currentTare);
+      updateDisplay(brutSafe, false);
+
+      if (!this._hass) return;
+      saveB_.disabled = true; saveB_.textContent = "Sauvegarde…";
+      try {
+        await this._hass.callService("tigertag", "update_spool_weight", {
+          uid: s.uid,
+          weight: net,
+          container_weight: 0,  // déjà soustrait — on envoie le poids NET
+        });
+        s.weight = net;  // mise à jour locale immédiate
+      } catch(e) {
+        console.error("[TigerTagCard] saveWeight:", e);
+      } finally {
+        saveB_.disabled = false; saveB_.textContent = "Enregistrer";
+      }
+    });
+
+    // Tare : après Appliquer, on force la mise à jour complète avec forceInput=true
     const saveTareAndResync = async () => {
       const v = parseInt(tareI_.value);
       if (isNaN(v)) return;
@@ -707,8 +1119,10 @@ class TigerTagCard extends HTMLElement {
       try {
         await this._hass.callService("tigertag", "set_spool_tare", { uid: s.uid, tare: v });
         s.tare = v; s.tare_custom = v;
-        // Recalculer avec le poids brut actuel (valeur dans l'input)
-        syncW(Number(winp_.value));
+        // Forcer la mise à jour de l'input et du slider avec la nouvelle tare
+        const brutCurrent = winp_ ? Number(winp_.value) : (this._editWeight + v);
+        updateDisplay(brutCurrent, true);
+        if (rng_) { rng_.min = v; rng_.max = s.capacity + v; rng_.value = brutCurrent; }
         tSave_.textContent = "Appliquer ✓";
         setTimeout(() => { tSave_.textContent = "Appliquer"; }, 1500);
       } catch(e) {
@@ -716,10 +1130,6 @@ class TigerTagCard extends HTMLElement {
         tSave_.textContent = "Appliquer";
       }
     };
-
-    if (rng_)   rng_.addEventListener("input",   e => syncW(e.target.value));
-    if (winp_)  winp_.addEventListener("input",  e => syncW(e.target.value));
-    if (saveB_) saveB_.addEventListener("click", () => this._saveWeight(s, saveB_));
     if (tSave_) tSave_.addEventListener("click", saveTareAndResync);
 
     // ── Section Emplacement ──
