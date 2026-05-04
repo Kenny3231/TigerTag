@@ -424,14 +424,17 @@ class TigerTagCard extends HTMLElement {
   }
 
   /* ── Lieux de stockage depuis le coordinator ─────────────────────────── */
-  _getConfigLocations() {
-    if (!this._hass) return ["Garage","Salon","Bureau"];
-    // Les lieux sont exposés dans coordinator.data["config_locations"]
-    // via l'attribut de n'importe quel sensor tigertag
-    const sensor = Object.values(this._hass.states).find(e =>
-      e.entity_id.startsWith("sensor.") && e.attributes.uid && e.entity_id.includes("tigertag")
-    );
-    return sensor?.attributes?.config_locations || ["Garage","Salon","Bureau"];
+  _getRacks() {
+    // Retourne {rack_id: {id, name, level, position}} depuis le sensor stats
+    if (!this._hass) return {};
+    const stats = Object.values(this._hass.states)
+      .find(e => e.entity_id === "sensor.tigertag_statistiques");
+    return stats?.attributes?.racks || {};
+  }
+
+  _getRackName(rack_id) {
+    if (!rack_id) return null;
+    return this._getRacks()[rack_id]?.name || rack_id;
   }
 
   /* ── Init DOM ────────────────────────────────────────────────────────── */
@@ -522,8 +525,9 @@ class TigerTagCard extends HTMLElement {
   }
 
   _buildFilters() {
-    const rooms   = this._getConfigLocations();
-    const filters = ["Toutes","Dans un AMS","Non placées","Stock faible",...rooms];
+    const racks   = this._getRacks();
+    const rackNames = Object.values(racks).sort((a,b) => a.order - b.order).map(r => r.name);
+    const filters = ["Toutes","Dans un AMS","Non placées","Stock faible",...rackNames];
     this._domFilters.innerHTML = "";
     filters.forEach(f => {
       const b = document.createElement("button");
@@ -587,7 +591,13 @@ class TigerTagCard extends HTMLElement {
       tare_official:parseFloat(a.container_weight) || 0,
       tare_custom:  a.container_weight_custom != null ? parseFloat(a.container_weight_custom) : null,
       ams_entity:   a.ams_location || null,   // entity_id du tray Bambu
-      room:         a.room_location || null,
+      rack_id:              a.rack_id || null,
+      rack_name:            a.rack_name || null,
+      rack_level:           a.rack_level ?? null,
+      rack_position:        a.rack_position ?? null,
+      rack_level_count:     a.rack_level_count ?? null,
+      rack_position_count:  a.rack_position_count ?? null,
+      rack_order:           a.rack_order ?? null,
       nozzle_min:   a.nozzle_temp_min || null,
       nozzle_max:   a.nozzle_temp_max || null,
       bed_min:      a.bed_temp_min || null,
@@ -629,16 +639,46 @@ class TigerTagCard extends HTMLElement {
     const q   = this._search.toLowerCase();
     const f   = this._filter;
     const thr = 250;
-    return all.filter(s => {
+    const filtered = all.filter(s => {
       const mq = !q || s.name.toLowerCase().includes(q) || s.brand.toLowerCase().includes(q)
                || s.material.toLowerCase().includes(q)  || s.uid.toLowerCase().includes(q);
       const mf = f === "Toutes"
         || (f === "Dans un AMS"  && s.ams_entity)
-        || (f === "Non placées"  && !s.ams_entity && !s.room)
+        || (f === "Non placées"  && !s.ams_entity && !s.rack_id)
         || (f === "Stock faible" && s.weight < thr && s.weight >= 0)
-        || s.room === f;
+        || s.rack_name === f;
       return mq && mf;
     });
+
+    // Tri spécifique par filtre :
+    if (f === "Dans un AMS") {
+      // Tri par entity_id du tray → T1, T2, T3, T4 dans l'ordre naturel
+      filtered.sort((a, b) => {
+        const ea = a.ams_entity || "";
+        const eb = b.ams_entity || "";
+        // Extraire le numéro de tray en fin d'entity_id (ex: _1, _2…)
+        const na = parseInt((ea.match(/(\d+)$/) || [])[1] ?? "0");
+        const nb = parseInt((eb.match(/(\d+)$/) || [])[1] ?? "0");
+        if (ea !== eb) {
+          if (na !== nb) return na - nb;
+          return ea.localeCompare(eb);
+        }
+        return a.name.localeCompare(b.name);
+      });
+    } else if (f !== "Toutes" && f !== "Non placées" && f !== "Stock faible") {
+      // Rack sélectionné : Niveau 0 pos 0, 1, 2… puis Niveau 1 pos 0, 1, 2… etc.
+      filtered.sort((a, b) => {
+        const la = a.rack_level    ?? 999;
+        const lb = b.rack_level    ?? 999;
+        const pa = a.rack_position ?? 999;
+        const pb = b.rack_position ?? 999;
+        if (la !== lb) return la - lb;
+        if (pa !== pb) return pa - pb;
+        return a.name.localeCompare(b.name);
+      });
+    }
+
+    return filtered;
   }
 
   /* ── Rendu (grille ou tableau selon le mode) ──────────────────────── */
@@ -788,8 +828,8 @@ class TigerTagCard extends HTMLElement {
       if (s.ams_entity && this._hass?.states[s.ams_entity]) {
         const n = this._shortAmsName(s.ams_entity);
         tdRoom.innerHTML = `<span class="tt-tag tt-tag-ams">${this._esc(n)}</span>`;
-      } else if (s.room) {
-        tdRoom.innerHTML = `<span class="tt-tag tt-tag-room">${this._esc(s.room)}</span>`;
+      } else if (s.rack_name) {
+        tdRoom.innerHTML = `<span class="tt-tag tt-tag-room">${this._esc(s.rack_name)}</span>`;
       } else {
         tdRoom.innerHTML = `<span style="color:var(--secondary-text-color);font-size:11px">—</span>`;
       }
@@ -815,7 +855,7 @@ class TigerTagCard extends HTMLElement {
       case "brand":    return (s.brand||"").toLowerCase();
       case "weight":   return s.weight;
       case "capacity": return s.capacity;
-      case "room":     return (s.room||s.ams_entity||"").toLowerCase();
+      case "room":     return (s.rack_name||s.ams_entity||"").toLowerCase();
       case "type":     return s.is_plus ? 0 : 1;
       case "updated":  return s.last_update || 0;
       default:         return "";
@@ -965,8 +1005,8 @@ class TigerTagCard extends HTMLElement {
     // Badges en overlay sur l'image — ordre : emplacement → TigerTag/TigerTag+
     const locBadge = amsLabel
       ? `<span class="tt-tag tt-tag-ams" title="${this._esc(s.ams_entity || '')}">${this._esc(amsLabel)}</span>`
-      : s.room
-        ? `<span class="tt-tag tt-tag-room">${this._esc(s.room)}</span>`
+      : s.rack_name
+        ? `<span class="tt-tag tt-tag-room">${this._esc(s.rack_name)}</span>`
         : "";
     const typeBadge = `<span class="tt-tag ${s.is_plus ? "tt-tag-plus" : "tt-tag-base"}">${s.is_plus ? "TigerTag+" : "TigerTag"}</span>`;
     const allBadges = (locBadge ? locBadge + typeBadge : typeBadge);
@@ -1057,10 +1097,10 @@ class TigerTagCard extends HTMLElement {
     tagBar.className = "tt-panel-tags";
     // Lieu de stockage — affiché seulement si pas dans un AMS
     // (quand dans AMS, room = nom imprimante = redondant avec le tag AMS)
-    if (s.room && !s.ams_entity) {
+    if (s.rack_name && !s.ams_entity) {
       const roomTag = document.createElement("span");
       roomTag.className = "tt-tag tt-tag-room";
-      roomTag.textContent = s.room;
+      roomTag.textContent = s.rack_name;
       tagBar.appendChild(roomTag);
     }
     // Emplacement AMS
@@ -1374,13 +1414,24 @@ class TigerTagCard extends HTMLElement {
     finally { btn.textContent = "Appliquer ✓"; setTimeout(() => { btn.textContent = "Appliquer"; }, 1500); }
   }
 
-  async _setRoom(s, v) {
+  async _setRack(s, rackId, level, position) {
     if (!this._hass) return;
     try {
-      await this._hass.callService("tigertag", "set_spool_room", {
-        uid: s.uid, room: v === "—" ? null : v,
-      });
-    } catch(e) { console.error("[TigerTagCard] setRoom:", e); }
+      const data = { uid: s.uid, rack_id: rackId || null };
+      if (level    !== undefined && level    !== null) data.level    = level;
+      if (position !== undefined && position !== null) data.position = position;
+      await this._hass.callService("tigertag", "set_spool_rack", data);
+      s.rack_id       = rackId || null;
+      s.rack_name     = rackId ? this._getRackName(rackId) : null;
+      s.rack_level    = level    ?? null;
+      s.rack_position = position ?? null;
+      // Le service Python efface automatiquement la location AMS quand rack_id est fourni
+      // On met à jour l'objet local pour que l'UI reflète immédiatement le changement
+      if (rackId && s.ams_entity) {
+        s.ams_entity = null;
+      }
+      this._refreshPanelTags(s);
+    } catch(e) { console.error("[TigerTagCard] setRack:", e); }
   }
 
   async _setAms(s, entityId) {
@@ -1395,12 +1446,20 @@ class TigerTagCard extends HTMLElement {
       try {
         await this._hass.callService("tigertag", "set_bambu_ams_filament", data);
         s.ams_entity = newAms;
+        // Retirer du rack si la bobine y était placée
+        if (s.rack_id) {
+          await this._hass.callService("tigertag", "set_spool_rack", { uid: s.uid, rack_id: null });
+          s.rack_id       = null;
+          s.rack_name     = null;
+          s.rack_level    = null;
+          s.rack_position = null;
+        }
         this._refreshPanelTags(s);
         this._refreshEmplacementTab(s);
       } catch(e) { console.error("[TigerTagCard] setAms:", e); }
     } else {
       try {
-        await this._hass.callService("tigertag", "set_spool_room", { uid: s.uid, room: null });
+        await this._hass.callService("tigertag", "set_spool_rack", { uid: s.uid, rack_id: null });
         s.ams_entity = null;
         this._refreshPanelTags(s);
         this._refreshEmplacementTab(s);
@@ -1463,9 +1522,9 @@ class TigerTagCard extends HTMLElement {
     const tagBar = this._domPanel?.querySelector(".tt-panel-tags");
     if (!tagBar) return;
     tagBar.innerHTML = "";
-    if (s.room && !s.ams_entity) {
+    if (s.rack_name && !s.ams_entity) {
       const r = document.createElement("span");
-      r.className = "tt-tag tt-tag-room"; r.textContent = s.room;
+      r.className = "tt-tag tt-tag-room"; r.textContent = s.rack_name;
       tagBar.appendChild(r);
     }
     if (s.ams_entity && this._hass?.states[s.ams_entity]) {
@@ -1499,52 +1558,180 @@ class TigerTagCard extends HTMLElement {
   /* ── Utils ───────────────────────────────────────────────────────────── */
   /* ── Onglet Emplacement ─────────────────────────────────────────────────── */
   _buildEmplacementTab(container, s) {
-    container.style.padding = "12px";
+    container.style.padding       = "12px";
     container.style.flexDirection = "column";
-    container.style.gap = "14px";
+    container.style.gap           = "14px";
 
-    // ── Lieu de stockage ──
-    const rooms = this._getConfigLocations();
-    const roomSec = document.createElement("div");
-    roomSec.innerHTML = `<div class="tt-section-label">Lieu de stockage</div>
-      <select class="tt-loc-sel" id="tt-room" style="width:100%">
-        <option value="—">Non placée</option>
-        ${rooms.map(r=>`<option value="${r}"${s.room===r?" selected":""}>${this._esc(r)}</option>`).join("")}
-      </select>`;
-    container.appendChild(roomSec);
-    requestAnimationFrame(() => {
-      const rs = roomSec.querySelector("#tt-room");
-      if (rs) rs.addEventListener("change", e => this._setRoom(s, e.target.value));
+    // État interne de l'onglet — reset à chaque ouverture
+    this._amsState = { tray: null, profile: null, uid: s.uid, spool: s };
+    this._rackState = { rack_id: s.rack_id || null, level: s.rack_level ?? null, position: s.rack_position ?? null };
+
+    // ══════════════════════════════════════════════════════
+    // SECTION RACK
+    // ══════════════════════════════════════════════════════
+    const racks       = this._getRacks();
+    const racksSorted = Object.values(racks).sort((a,b) => (a.order||0) - (b.order||0));
+
+    const rackSec = document.createElement("div");
+    rackSec.id = "tt-rack-sec";
+
+    const rackLabel = document.createElement("div");
+    rackLabel.className = "tt-section-label";
+    rackLabel.textContent = "Rack de stockage";
+    rackSec.appendChild(rackLabel);
+
+    // Sélecteur du rack
+    const rackSel = document.createElement("select");
+    rackSel.className = "tt-loc-sel";
+    rackSel.style.width = "100%";
+    rackSel.innerHTML = `<option value="">— Non placée —</option>` +
+      racksSorted.map(r =>
+        `<option value="${r.id}"${s.rack_id === r.id ? " selected" : ""}>${this._esc(r.name)}</option>`
+      ).join("");
+    rackSec.appendChild(rackSel);
+
+    // Sélecteurs étage + position (visibles seulement si rack sélectionné)
+    const rackPosRow = document.createElement("div");
+    rackPosRow.style.cssText = "display:flex;gap:8px;margin-top:8px";
+    rackPosRow.id = "tt-rack-pos-row";
+
+    // Sélecteur étage
+    const levelWrap = document.createElement("div");
+    levelWrap.style.flex = "1";
+    const levelLabel = document.createElement("div");
+    levelLabel.style.cssText = "font-size:10px;color:var(--secondary-text-color);margin-bottom:3px";
+    levelLabel.textContent = "Niveau";
+    const levelSel = document.createElement("select");
+    levelSel.className = "tt-loc-sel";
+    levelSel.style.width = "100%";
+    levelSel.id = "tt-rack-level";
+    levelWrap.appendChild(levelLabel);
+    levelWrap.appendChild(levelSel);
+
+    // Sélecteur position
+    const posWrap = document.createElement("div");
+    posWrap.style.flex = "1";
+    const posLabel = document.createElement("div");
+    posLabel.style.cssText = "font-size:10px;color:var(--secondary-text-color);margin-bottom:3px";
+    posLabel.textContent = "Position";
+    const posSel = document.createElement("select");
+    posSel.className = "tt-loc-sel";
+    posSel.style.width = "100%";
+    posSel.id = "tt-rack-position";
+    posWrap.appendChild(posLabel);
+    posWrap.appendChild(posSel);
+
+    rackPosRow.appendChild(levelWrap);
+    rackPosRow.appendChild(posWrap);
+    rackSec.appendChild(rackPosRow);
+
+    // Remplit les sélecteurs étage/position selon le rack choisi
+    const fillRackPos = (rackId) => {
+      const rack = racks[rackId];
+      levelSel.innerHTML = "";
+      posSel.innerHTML   = "";
+
+      if (!rack) {
+        rackPosRow.style.display = "none";
+        this._rackState.level    = null;
+        this._rackState.position = null;
+        return;
+      }
+
+      rackPosRow.style.display = "flex";
+
+      // Étages : 0 → level_count - 1 (ou level_count si 1-based selon le rack)
+      const nbLevels = rack.level_count ?? rack.level ?? 1;
+      for (let i = 0; i < nbLevels; i++) {
+        const o = document.createElement("option");
+        o.value = i;
+        o.textContent = String(i);
+        if (s.rack_level === i && s.rack_id === rackId) o.selected = true;
+        levelSel.appendChild(o);
+      }
+
+      // Positions : 1 → position_count
+      const nbPos = rack.position_count ?? rack.position ?? 5;
+      for (let i = 1; i <= nbPos; i++) {
+        const o = document.createElement("option");
+        o.value = i - 1;
+        o.textContent = String(i - 1);
+        if (s.rack_position === (i - 1) && s.rack_id === rackId) o.selected = true;
+        posSel.appendChild(o);
+      }
+
+      // Mettre à jour l'état local
+      this._rackState.level    = parseInt(levelSel.value);
+      this._rackState.position = parseInt(posSel.value);
+    };
+
+    // Init avec le rack actuel
+    const initRackId = s.rack_id || "";
+    fillRackPos(initRackId);
+    if (!initRackId) rackPosRow.style.display = "none";
+
+    // Listeners rack
+    rackSel.addEventListener("change", e => {
+      const rid = e.target.value || null;
+      this._rackState.rack_id = rid;
+      fillRackPos(rid || "");
+      // Rack sélectionné → cacher AMS
+      _toggleAmsSec(!rid);
     });
 
-    // ── Emplacement AMS ──
+    levelSel.addEventListener("change", e => {
+      this._rackState.level = e.target.value !== "" ? parseInt(e.target.value) : null;
+    });
+    posSel.addEventListener("change", e => {
+      this._rackState.position = e.target.value !== "" ? parseInt(e.target.value) : null;
+    });
+
+    container.appendChild(rackSec);
+
+    // ══════════════════════════════════════════════════════
+    // SECTION AMS
+    // ══════════════════════════════════════════════════════
+    const amsSec = document.createElement("div");
+    amsSec.id = "tt-ams-sec";
+
+    const toggleAmsSec = (show) => {
+      amsSec.style.display    = show ? "" : "none";
+      profileSec.style.display = show ? "" : "none";
+    };
+
     const trays = this._getBambuTrayEntities();
+
     if (!trays.length) {
       const noAms = document.createElement("div");
       noAms.style.cssText = "font-size:12px;color:var(--secondary-text-color)";
       noAms.textContent = "Aucune imprimante Bambu détectée";
-      container.appendChild(noAms);
+      amsSec.appendChild(noAms);
     } else {
-      const amsSec = document.createElement("div");
-      amsSec.innerHTML = `<div class="tt-section-label">Emplacement AMS / Imprimante</div>`;
+      const amsLabel = document.createElement("div");
+      amsLabel.className = "tt-section-label";
+      amsLabel.textContent = "Emplacement AMS / Imprimante";
+      amsSec.appendChild(amsLabel);
 
-      // Sélecteurs imprimante + AMS en ligne
-      const selRow = document.createElement("div");
-      selRow.style.cssText = "display:flex;gap:6px;margin-bottom:10px";
-
-      const printers = [...new Set(trays.map(e => this._printerName(e.entity_id)))];
+      // ── Étape 1 : sélecteur imprimante ──
+      const printers    = [...new Set(trays.map(e => this._printerName(e.entity_id)))];
       const initPrinter = s.ams_entity ? this._printerName(s.ams_entity) : printers[0];
 
       const pSel = document.createElement("select");
-      pSel.className = "tt-loc-sel"; pSel.style.flex = "1";
+      pSel.className = "tt-loc-sel";
+      pSel.style.width = "100%";
       printers.forEach(p => {
         const o = document.createElement("option");
         o.value = p; o.textContent = p;
         if (p === initPrinter) o.selected = true;
         pSel.appendChild(o);
       });
+      amsSec.appendChild(pSel);
 
-      // AMS groups pour l'imprimante courante
+      // ── Étape 2 : sélecteur AMS / Externe (caché jusqu'à imprimante choisie) ──
+      const amsGroupRow = document.createElement("div");
+      amsGroupRow.id = "tt-ams-group-row";
+      amsGroupRow.style.marginTop = "8px";
+
       const getAmsGroups = (printer) => {
         const groups = {};
         trays.filter(e => this._printerName(e.entity_id) === printer).forEach(e => {
@@ -1557,7 +1744,9 @@ class TigerTagCard extends HTMLElement {
       };
 
       const amsSel = document.createElement("select");
-      amsSel.className = "tt-loc-sel"; amsSel.style.flex = "1";
+      amsSel.className = "tt-loc-sel";
+      amsSel.style.width = "100%";
+      amsSel.id = "tt-ams-group-sel";
 
       const fillAmsSel = (printer) => {
         amsSel.innerHTML = "";
@@ -1574,14 +1763,13 @@ class TigerTagCard extends HTMLElement {
         }
       };
       fillAmsSel(initPrinter);
+      amsGroupRow.appendChild(amsSel);
+      amsSec.appendChild(amsGroupRow);
 
-      selRow.appendChild(pSel);
-      selRow.appendChild(amsSel);
-      amsSec.appendChild(selRow);
-
-      // Grille des slots
+      // ── Étape 3 : grille des slots (cachée jusqu'à AMS choisi) ──
       const slotsDiv = document.createElement("div");
       slotsDiv.id = "tt-ams-slots";
+      slotsDiv.style.marginTop = "10px";
 
       const renderSlots = (printer, amsGroup) => {
         slotsDiv.innerHTML = "";
@@ -1590,13 +1778,12 @@ class TigerTagCard extends HTMLElement {
         const isExt  = amsGroup === "Externe";
 
         const grid = document.createElement("div");
-        // Toujours 4 colonnes pour l'AMS, 1 centrée pour externe
         const colCount = isExt ? 1 : 4;
         grid.style.cssText = `display:grid;grid-template-columns:repeat(${colCount},1fr);gap:6px`;
         if (isExt) { grid.style.maxWidth = "25%"; grid.style.margin = "0 auto"; }
 
         items.forEach(e => {
-          const a = e.attributes;
+          const a        = e.attributes;
           const isCurrent = e.entity_id === s.ams_entity;
           const isActive  = a.active;
           const tagUid    = (a.tag_uid || "").replace(/0/g,"");
@@ -1605,16 +1792,14 @@ class TigerTagCard extends HTMLElement {
           const hasTiger  = !!tiger;
           const remain    = a.remain >= 0 ? a.remain : null;
 
-          // Couleur de la bobine dans ce slot
-          let dotColor = "var(--divider-color)";
+          let dotColor  = "var(--divider-color)";
           let fillColor = "transparent";
           if (hasTiger) {
             dotColor  = tiger.color_hex || "#888";
             fillColor = dotColor + "22";
           } else if (hasRfid) {
-            // Bambu expose tray_color (ex: "B12333FF") ou cols[0] (ex: "#B12333FF")
             let rawCol = a.tray_color || (a.cols && a.cols[0]) || "";
-            rawCol = rawCol.replace(/^#/, "").slice(0, 6);  // garder 6 chars hex
+            rawCol = rawCol.replace(/^#/, "").slice(0, 6);
             dotColor  = rawCol.length === 6 ? "#" + rawCol : "#888888";
             fillColor = dotColor + "22";
           }
@@ -1624,36 +1809,25 @@ class TigerTagCard extends HTMLElement {
           const col = document.createElement("div");
           col.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer";
 
-          // Numéro slot
           const lbl = document.createElement("div");
-          const m = e.entity_id.match(/(\d+)$/);
+          const m2 = e.entity_id.match(/(\d+)$/);
           lbl.style.cssText = "font-size:10px;font-weight:500;color:var(--secondary-text-color)";
-          lbl.textContent = isExt ? "Ext." : (m ? `T${m[1]}` : "?");
+          lbl.textContent = isExt ? "Ext." : (m2 ? `T${m2[1]}` : "?");
 
-          // Slot visuel
           const slot = document.createElement("div");
           slot.dataset.slotEid = e.entity_id;
           slot.style.cssText = `
             width:100%;border-radius:6px;height:80px;position:relative;overflow:hidden;
-            border:${isCurrent?"2px solid var(--tt-green)":"0.5px solid var(--divider-color)"};
+            border:${isCurrent ? "2px solid var(--tt-green)" : "0.5px solid var(--divider-color)"};
             background:var(--secondary-background-color);
           `;
 
-          // Barre de remplissage (couleur bobine, hauteur = %)
           if (pct !== null) {
             const fill = document.createElement("div");
-            fill.style.cssText = `
-              position:absolute;bottom:0;width:100%;height:${pct}%;
-              background:${fillColor};transition:height .3s;
-            `;
+            fill.style.cssText = `position:absolute;bottom:0;width:100%;height:${pct}%;background:${fillColor};transition:height .3s;`;
             slot.appendChild(fill);
-
-            // % affiché en bas
             const pctLbl = document.createElement("div");
-            pctLbl.style.cssText = `
-              position:absolute;bottom:2px;width:100%;text-align:center;
-              font-size:9px;font-weight:500;color:${dotColor};
-            `;
+            pctLbl.style.cssText = `position:absolute;bottom:2px;width:100%;text-align:center;font-size:9px;font-weight:500;color:${dotColor};`;
             pctLbl.textContent = pct + "%";
             slot.appendChild(pctLbl);
           } else if (!hasRfid && !hasTiger) {
@@ -1663,7 +1837,6 @@ class TigerTagCard extends HTMLElement {
             slot.appendChild(emptyLbl);
           }
 
-          // Dot couleur en haut
           const dot = document.createElement("div");
           dot.style.cssText = `
             position:absolute;top:5px;left:50%;transform:translateX(-50%);
@@ -1672,7 +1845,6 @@ class TigerTagCard extends HTMLElement {
           `;
           slot.appendChild(dot);
 
-          // Icône actif
           if (isActive) {
             const act = document.createElement("div");
             act.style.cssText = "position:absolute;top:2px;right:3px;font-size:8px;color:var(--tt-green)";
@@ -1680,12 +1852,10 @@ class TigerTagCard extends HTMLElement {
             slot.appendChild(act);
           }
 
-          // Nom bobine
           const name = document.createElement("div");
           name.style.cssText = "font-size:9px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;color:var(--primary-text-color)";
           name.textContent = hasTiger ? (tiger.name || "—") : (hasRfid ? (a.type || "Bambu") : "—");
 
-          // Badge type
           const badge = document.createElement("div");
           badge.style.cssText = "font-size:8px;padding:1px 4px;border-radius:3px;white-space:nowrap";
           if (hasTiger) {
@@ -1701,12 +1871,10 @@ class TigerTagCard extends HTMLElement {
             badge.textContent = "—";
           }
 
-          col.appendChild(lbl);
-          col.appendChild(slot);
-          col.appendChild(name);
-          col.appendChild(badge);
+          col.appendChild(lbl); col.appendChild(slot);
+          col.appendChild(name); col.appendChild(badge);
 
-          // Clic = assigner cette bobine à ce slot
+          // Clic slot → sélectionner + activer le bouton Assigner
           col.addEventListener("click", () => {
             slotsDiv.querySelectorAll("[data-slot-selected]").forEach(el => {
               el.style.border = "0.5px solid var(--divider-color)";
@@ -1715,11 +1883,15 @@ class TigerTagCard extends HTMLElement {
             slot.style.border = "2px solid var(--tt-green)";
             slot.dataset.slotSelected = "1";
             this._amsState.tray = e.entity_id;
-            // Activer le bouton Assigner
+            // Rack = vider
+            rackSel.value = "";
+            this._rackState.rack_id = null;
+            rackPosRow.style.display = "none";
+            // Activer bouton
             const vBtn = container.querySelector("#tt-validate-btn");
             if (vBtn) { vBtn.disabled = false; vBtn.style.opacity = "1"; vBtn.style.cursor = "pointer"; }
-            // Charger les profils
-            this._loadProfilesForPrinter(printer, s, container);
+            // Charger profils
+            this._loadProfilesForPrinter(pSel.value, s, container);
           });
 
           grid.appendChild(col);
@@ -1727,22 +1899,30 @@ class TigerTagCard extends HTMLElement {
         slotsDiv.appendChild(grid);
       };
 
-      // Init
+      // Init slots
       renderSlots(initPrinter, amsSel.value || Object.keys(getAmsGroups(initPrinter))[0]);
 
+      // Changement d'imprimante → refill AMS sel + re-render slots
       pSel.addEventListener("change", e => {
         fillAmsSel(e.target.value);
         renderSlots(e.target.value, amsSel.value);
-        // Charger les profils pour la nouvelle imprimante
+        this._amsState.tray = null;
+        const vBtn = container.querySelector("#tt-validate-btn");
+        if (vBtn) { vBtn.disabled = true; vBtn.style.opacity = "0.4"; }
         setTimeout(() => this._loadProfilesForPrinter(e.target.value, s, container), 50);
       });
+
+      // Changement AMS/Externe → re-render slots
       amsSel.addEventListener("change", e => {
         renderSlots(pSel.value, e.target.value);
+        this._amsState.tray = null;
+        const vBtn = container.querySelector("#tt-validate-btn");
+        if (vBtn) { vBtn.disabled = true; vBtn.style.opacity = "0.4"; }
       });
 
       amsSec.appendChild(slotsDiv);
 
-      // Bouton retirer si assignée
+      // Bouton retirer AMS
       if (s.ams_entity) {
         const removeBtn = document.createElement("button");
         removeBtn.className = "tt-btn-tare";
@@ -1755,46 +1935,101 @@ class TigerTagCard extends HTMLElement {
         });
         amsSec.appendChild(removeBtn);
       }
-
-      container.appendChild(amsSec);
     }
+    container.appendChild(amsSec);
 
-    // ── Profil filament ──
+    // ══════════════════════════════════════════════════════
+    // SECTION PROFIL FILAMENT
+    // ══════════════════════════════════════════════════════
     const profileSec = document.createElement("div");
+    profileSec.id = "tt-profile-sec";
     profileSec.innerHTML = `<div class="tt-section-label">Profil filament Bambu</div>
       <div id="tt-profile-list" style="font-size:11px;color:var(--secondary-text-color)">
         Sélectionne un emplacement pour charger les profils
       </div>`;
     container.appendChild(profileSec);
 
-    // ── Bouton Assigner (après le profil) ──
+    // Initialiser la visibilité : rack sélectionné → cacher AMS+profil
+    // On doit le faire après avoir appended les deux sections
+    const _toggleAmsSec = (show) => {
+      amsSec.style.display     = show ? "" : "none";
+      profileSec.style.display = show ? "" : "none";
+    };
+    // Si une bobine est déjà dans un rack, on cache l'AMS par défaut
+    _toggleAmsSec(!s.rack_id);
+    // Si rack est changé → relancé via listener déjà posé sur rackSel
+    // (on doit réassigner car _toggleAmsSec était pas encore défini au moment du listener)
+    rackSel.addEventListener("change", () => {
+      _toggleAmsSec(!rackSel.value);
+    });
+
+    // ══════════════════════════════════════════════════════
+    // BOUTON ASSIGNER UNIQUE
+    // ══════════════════════════════════════════════════════
     const validateBtn = document.createElement("button");
     validateBtn.className = "tt-btn-save";
-    validateBtn.style.cssText = "width:100%;margin-top:6px";
-    validateBtn.textContent = "Assigner à cet emplacement";
-    // Désactivé tant qu'aucun emplacement n'est sélectionné dans la grille
-    validateBtn.disabled = !this._amsState.tray;
+    validateBtn.style.cssText = "width:100%;margin-top:10px";
+    validateBtn.id = "tt-validate-btn";
+    validateBtn.textContent = "Assigner";
+
+    // Désactivé si : rack sélectionné sans level/position ET pas de slot AMS sélectionné
+    const isRackReady = () => rackSel.value && this._rackState.level !== null && this._rackState.position !== null;
+    const isAmsReady  = () => !!this._amsState.tray;
+
+    validateBtn.disabled = !(isRackReady() || isAmsReady());
     validateBtn.style.opacity = validateBtn.disabled ? "0.4" : "1";
     validateBtn.style.cursor  = validateBtn.disabled ? "default" : "pointer";
-    validateBtn.id = "tt-validate-btn";
+
+    // Mettre à jour l'état du bouton quand rack/level/position changent
+    const refreshBtn = () => {
+      const ok = isRackReady() || isAmsReady();
+      validateBtn.disabled     = !ok;
+      validateBtn.style.opacity = ok ? "1" : "0.4";
+      validateBtn.style.cursor  = ok ? "pointer" : "default";
+    };
+    rackSel.addEventListener("change",   refreshBtn);
+    levelSel.addEventListener("change",  refreshBtn);
+    posSel.addEventListener("change",    refreshBtn);
+
     validateBtn.addEventListener("click", async () => {
-      const tray = this._amsState.tray;
-      if (!tray) return;
-      validateBtn.disabled = true; validateBtn.textContent = "Envoi…";
-      await this._setAms(s, tray);
-      validateBtn.disabled = false; validateBtn.textContent = "Assigner à cet emplacement";
+      validateBtn.disabled = true;
+      validateBtn.textContent = "Envoi…";
+      try {
+        if (isRackReady()) {
+          // Rack prioritaire — efface AMS si nécessaire puis assigne au rack
+          await this._setRack(
+            s,
+            this._rackState.rack_id,
+            this._rackState.level,
+            this._rackState.position
+          );
+        } else if (isAmsReady()) {
+          // Assigner à l'AMS seulement si aucun rack sélectionné
+          await this._setAms(s, this._amsState.tray);
+        }
+        validateBtn.textContent = "Assigné ✓";
+        setTimeout(() => { validateBtn.textContent = "Assigner"; }, 1800);
+      } catch(e) {
+        console.error("[TigerTagCard] assign:", e);
+        validateBtn.textContent = "Erreur";
+        setTimeout(() => { validateBtn.textContent = "Assigner"; }, 1800);
+      } finally {
+        validateBtn.disabled = false;
+        refreshBtn();
+      }
     });
     container.appendChild(validateBtn);
 
-    // Charger profils dès l'ouverture
-    const firstPrinter = s.ams_entity
-      ? this._printerName(s.ams_entity)
-      : (trays.length ? this._printerName(trays[0].entity_id) : null);
-    if (firstPrinter) {
-      if (s.ams_entity) this._amsState.tray = s.ams_entity;
+    // Charger les profils si déjà dans un AMS
+    // Note : on ne pré-remplit PAS _amsState.tray ici pour que isAmsReady()
+    // reste false tant que l'utilisateur n'a pas explicitement cliqué un slot.
+    // Ainsi, sélectionner un rack + niveau + position prend la priorité.
+    if (s.ams_entity) {
+      const firstPrinter = this._printerName(s.ams_entity);
       setTimeout(() => this._loadProfilesForPrinter(firstPrinter, s, container), 150);
     }
   }
+
 
   _renderTempSection(container, s, overrideTemps) {
     // overrideTemps = {nozzle_min, nozzle_max, bed_min, bed_max, dry_temp, dry_time}

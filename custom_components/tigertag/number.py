@@ -77,7 +77,7 @@ class TigerTagSpoolNumber(CoordinatorEntity[TigerTagDataUpdateCoordinator], Numb
         self._uid   = uid
         self._attr_unique_id = f"tigertag_number_{uid}"
         # entity_id fixe avec préfixe tigertag_ — indépendant du nom du device
-        self.entity_id = f"number.tigertag_{uid}"
+        self.entity_id = f"number.tigertag_{uid.lower()}"
 
     # ------------------------------------------------------------------
     # Suppression automatique si la bobine disparaît de l'inventaire

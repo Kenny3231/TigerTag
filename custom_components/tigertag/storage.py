@@ -1,4 +1,4 @@
-"""Persistance locale pour TigerTag : références, emplacements AMS, lieux, tares custom."""
+"""Persistance locale pour TigerTag : références, emplacements AMS, tares, profils, tokens."""
 import logging
 from datetime import datetime
 from typing import Any
@@ -17,34 +17,31 @@ class TigerTagStorage:
     Gère toute la persistance locale :
     - Références (brand, material…) avec cache 24h
     - Emplacements AMS  {uid: "sensor.p2s_ams_1_emplacement_1"}
-    - Lieux de stockage {uid: "Garage"}
-    - Tares custom      {uid: 250}  (override du container_weight officiel)
+    - Tares custom      {uid: 250}
+    - Profils filament  {uid: "GFL96"}
+    - Tokens Firebase   {refresh_token, id_token}
     """
 
     def __init__(self, hass: HomeAssistant) -> None:
-        self._ref_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}_references.json")
-        self._loc_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}_locations.json")
-        self._room_store = Store(hass, _STORE_VERSION, f"{DOMAIN}_rooms.json")
-        self._tare_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}_tares.json")
-        self._prev_store    = Store(hass, _STORE_VERSION, f"{DOMAIN}_prev_rooms.json")
+        self._ref_store     = Store(hass, _STORE_VERSION, f"{DOMAIN}_references.json")
+        self._loc_store     = Store(hass, _STORE_VERSION, f"{DOMAIN}_locations.json")
+        self._tare_store    = Store(hass, _STORE_VERSION, f"{DOMAIN}_tares.json")
         self._profile_store = Store(hass, _STORE_VERSION, f"{DOMAIN}_spool_profiles.json")
+        self._token_store   = Store(hass, _STORE_VERSION, f"{DOMAIN}_firebase_tokens.json")
 
-        self._references: dict[str, Any] = {}
-        self._locations:  dict[str, str] = {}   # uid → entity_id tray Bambu
-        self._rooms:      dict[str, str] = {}   # uid → lieu de stockage
-        self._tares:      dict[str, int] = {}   # uid → tare en grammes
-        self._prev_rooms:    dict[str, str] = {}   # uid → lieu précédent (avant AMS)
-        self._spool_profiles: dict[str, str] = {}   # uid → tray_info_idx sauvegardé
+        self._references:     dict[str, Any] = {}
+        self._locations:      dict[str, str] = {}   # uid → entity_id tray Bambu
+        self._tares:          dict[str, int] = {}   # uid → tare en grammes
+        self._spool_profiles: dict[str, str] = {}   # uid → tray_info_idx
+        self._firebase_tokens: dict[str, str] = {}  # refresh_token, id_token
         self._references_fetched_at: datetime | None = None
 
-    # ── Chargement initial ──────────────────────────────────────────────────
     async def async_load(self) -> None:
         await self._load_refs()
         await self._load_locations()
-        await self._load_rooms()
         await self._load_tares()
-        await self._load_prev_rooms()
         await self._load_spool_profiles()
+        await self._load_firebase_tokens()
 
     async def _load_refs(self) -> None:
         d = await self._ref_store.async_load()
@@ -62,25 +59,20 @@ class TigerTagStorage:
         if isinstance(d, dict):
             self._locations = d
 
-    async def _load_rooms(self) -> None:
-        d = await self._room_store.async_load()
-        if isinstance(d, dict):
-            self._rooms = d
-
     async def _load_tares(self) -> None:
         d = await self._tare_store.async_load()
         if isinstance(d, dict):
             self._tares = d
 
-    async def _load_prev_rooms(self) -> None:
-        d = await self._prev_store.async_load()
-        if isinstance(d, dict):
-            self._prev_rooms = d
-
     async def _load_spool_profiles(self) -> None:
         d = await self._profile_store.async_load()
         if isinstance(d, dict):
             self._spool_profiles = d
+
+    async def _load_firebase_tokens(self) -> None:
+        d = await self._token_store.async_load()
+        if isinstance(d, dict):
+            self._firebase_tokens = d
 
     # ── Références ──────────────────────────────────────────────────────────
     @property
@@ -99,7 +91,7 @@ class TigerTagStorage:
             "data": refs, "updated_at": self._references_fetched_at.isoformat()
         })
 
-    # ── Emplacements AMS (entity_id tray Bambu) ─────────────────────────────
+    # ── Emplacements AMS ─────────────────────────────────────────────────────
     @property
     def locations(self) -> dict[str, str]:
         return self._locations
@@ -113,43 +105,6 @@ class TigerTagStorage:
         else:
             self._locations[uid] = entity_id
         await self._loc_store.async_save(self._locations)
-
-    # ── Lieux de stockage (pièce) ────────────────────────────────────────────
-    @property
-    def rooms(self) -> dict[str, str]:
-        return self._rooms
-
-    def get_room(self, uid: str) -> str | None:
-        return self._rooms.get(uid)
-
-    async def async_set_room(self, uid: str, room: str | None) -> None:
-        if room is None:
-            self._rooms.pop(uid, None)
-        else:
-            self._rooms[uid] = room
-        await self._room_store.async_save(self._rooms)
-
-    # ── Profils filament sauvegardés ──────────────────────────────────────────
-    def get_spool_profile(self, uid: str) -> str | None:
-        return self._spool_profiles.get(uid)
-
-    async def async_set_spool_profile(self, uid: str, tray_info_idx: str | None) -> None:
-        if tray_info_idx is None:
-            self._spool_profiles.pop(uid, None)
-        else:
-            self._spool_profiles[uid] = tray_info_idx
-        await self._profile_store.async_save(self._spool_profiles)
-
-    # ── Lieux précédents (avant AMS) ───────────────────────────────────────────
-    def get_prev_room(self, uid: str) -> str | None:
-        return self._prev_rooms.get(uid)
-
-    async def async_set_prev_room(self, uid: str, room: str | None) -> None:
-        if room is None:
-            self._prev_rooms.pop(uid, None)
-        else:
-            self._prev_rooms[uid] = room
-        await self._prev_store.async_save(self._prev_rooms)
 
     # ── Tares custom ─────────────────────────────────────────────────────────
     @property
@@ -165,3 +120,25 @@ class TigerTagStorage:
         else:
             self._tares[uid] = tare_g
         await self._tare_store.async_save(self._tares)
+
+    # ── Profils filament ──────────────────────────────────────────────────────
+    def get_spool_profile(self, uid: str) -> str | None:
+        return self._spool_profiles.get(uid)
+
+    async def async_set_spool_profile(self, uid: str, tray_info_idx: str | None) -> None:
+        if tray_info_idx is None:
+            self._spool_profiles.pop(uid, None)
+        else:
+            self._spool_profiles[uid] = tray_info_idx
+        await self._profile_store.async_save(self._spool_profiles)
+
+    # ── Firebase tokens ───────────────────────────────────────────────────────
+    def get_refresh_token(self) -> str:
+        return self._firebase_tokens.get("refresh_token", "")
+
+    def get_id_token(self) -> str:
+        return self._firebase_tokens.get("id_token", "")
+
+    async def async_save_tokens(self, refresh_token: str, id_token: str = "") -> None:
+        self._firebase_tokens = {"refresh_token": refresh_token, "id_token": id_token}
+        await self._token_store.async_save(self._firebase_tokens)
